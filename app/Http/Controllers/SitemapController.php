@@ -82,7 +82,7 @@ class SitemapController extends Controller
 
             $sitemap .= $this->addUrl(
 
-                "https://leseditionsdudjembe.com/livre/{$book->id}",
+                "https://leseditionsdudjembe.com/livres/{$book->slug}",
 
                 '0.8',
 

@@ -20,3 +20,15 @@ yarn-error.log
 /.idea
 /.vscode
 .env
+
+maisonedition.sql
+.rnd
+
+# Passport OAuth keys
+storage/*.key
+
+.phpunit.result.cache
+
+# Uploads locaux (stockage dev, hors dépôt)
+public/books/documents/*.pdf
+public/books/extrait_documents/*.pdf

@@ -3,8 +3,7 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\contact;
-// use App\Models\ContactReply;
+use App\Models\Contact;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 
@@ -29,7 +28,7 @@ class ContactController extends Controller
         $perPage = $request->query('per_page', 20);
         
         // Commencer la requête
-        $query = contact::select();
+        $query = Contact::select();
         
         // Appliquer les filtres
         if ($status && in_array($status, ['pending', 'read', 'replied', 'archived'])) {
@@ -84,7 +83,7 @@ class ContactController extends Controller
             return response()->json(['message' => 'Unauthorized'], 401);
         }
         
-        $contact = contact::with('replies.user')->find($id);
+        $contact = Contact::find($id);
         
         if (!$contact) {
             return response()->json(['message' => 'Contact not found'], 404);
@@ -111,7 +110,7 @@ class ContactController extends Controller
             return response()->json(['errors' => $validator->errors()], 422);
         }
         
-        $contact = contact::create([
+        $contact = Contact::create([
             'name' => $request->name,
             'email' => $request->email,
             'phone' => $request->phone,
@@ -148,7 +147,7 @@ class ContactController extends Controller
             return response()->json(['errors' => $validator->errors()], 422);
         }
         
-        $contact = contact::find($id);
+        $contact = Contact::find($id);
         
         if (!$contact) {
             return response()->json(['message' => 'Contact not found'], 404);
@@ -179,16 +178,12 @@ class ContactController extends Controller
             return response()->json(['message' => 'Unauthorized'], 401);
         }
         
-        $contact = contact::find($id);
+        $contact = Contact::find($id);
         
         if (!$contact) {
             return response()->json(['message' => 'Contact not found'], 404);
         }
         
-        // Supprimer d'abord les réponses associées
-        $contact->replies()->delete();
-        
-        // Puis supprimer le contact
         $contact->delete();
         
         return response()->json([
@@ -207,14 +202,14 @@ class ContactController extends Controller
             return response()->json(['message' => 'Unauthorized'], 401);
         }
         
-        $total = contact::count();
-        $pending = contact::pending()->count();
-        $read = contact::read()->count();
-        $replied = contact::replied()->count();
-        $archived = contact::archived()->count();
+        $total = Contact::count();
+        $pending = Contact::pending()->count();
+        $read = Contact::read()->count();
+        $replied = Contact::replied()->count();
+        $archived = Contact::archived()->count();
         
         // Contacts des 7 derniers jours
-        $recentContacts = contact::where('created_at', '>=', now()->subDays(7))
+        $recentContacts = Contact::where('created_at', '>=', now()->subDays(7))
             ->orderBy('created_at', 'desc')
             ->take(10)
             ->get();

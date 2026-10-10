@@ -2,7 +2,7 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\domaine;
+use App\Models\Domaine;
 use App\Models\User;
 use App\Models\Video;
 use App\Models\Service;
@@ -27,7 +27,7 @@ class UserController extends Controller
     {
         $lastarticles = Article::orderBy('created_at', 'desc')->where('status', 1)->take(3)->get();
         $lastmemoirs = Memoir::orderBy('created_at', 'desc')->where('status', 1)->take(3)->get()->map(function ($mem) {
-            $mem->domain = domaine::where('id', $mem->domain)->first()->name;
+            $mem->domain = Domaine::where('id', $mem->domain)->first()->name;
             return $mem;
         });
         $lastbooks = Book::orderby('created_at', 'desc')->where('status', 1)->take(3)->get()->map(function ($book) {
@@ -41,14 +41,21 @@ class UserController extends Controller
         ], 200);
     }
     public function updatearticleview(Request $request){
-        $article=Article::where('id',$request->id)->first();
-        $article->views_count= $article->views_count+1;
-        $article->save();
-        return response()->json('success',200);
+        $article = Article::find($request->id);
+        if (!$article) {
+            return response()->json(['message' => 'Article non trouvé'], 404);
+        }
+        Article::where('id', $article->id)->increment('views_count');
+        return response()->json('success', 200);
     }
     public function downloadbook($id)
     {
         $book = book::find($id);
+        if (!$book || !$book->extraitdocument) {
+            return response()->json([
+                'error' => 'Fichier PDF non trouvé'
+            ], 404);
+        }
         $filePath =  public_path("books/extrait_documents/" . $book->extraitdocument);
 
 
@@ -70,6 +77,11 @@ class UserController extends Controller
     public function downloadmemoir($id)
     {
         $memoir = Memoir::where('id',$id)->first();
+        if (!$memoir || !$memoir->document) {
+            return response()->json([
+                'error' => 'Fichier PDF non trouvé'
+            ], 404);
+        }
         $filePath =  public_path("memoirs/documents/" . $memoir->document);
 
         // Vérifier si le fichier existe
@@ -78,13 +90,9 @@ class UserController extends Controller
                 'error' => 'Fichier PDF non trouvé'
             ], 404);
         }
-        $memoir = Memoir::find($id);
-        $memoir->downloads_count = $memoir->downloads_count + 1;
-        $memoir->save();
+        Memoir::where('id', $id)->increment('downloads_count');
 
-
-
-        return response()->download($filePath, $memoir->title . '.' . $memoir->extension, [
+        return response()->download($filePath, $memoir->title . '.pdf', [
             'Content-Type' => 'application/pdf',
             'Content-Disposition' => 'attachment; filename="' . $memoir->title . '.' . $memoir->extension . '"'
         ]);
@@ -93,7 +101,7 @@ class UserController extends Controller
     {
         if ($type == 'null') {
             $categories = Categorie::all();
-            $domaine = domaine::all();
+            $domaine = Domaine::all();
             $services = service::all();
             $paginator = video::orderBy('id', 'desc')->cursorPaginate(10000);
             $videonextUrl = optional($paginator->nextCursor())->encode();
@@ -213,14 +221,17 @@ class UserController extends Controller
     public function store(Request $request)
     {
         $validator = Validator::make($request->all(), [
-            'name' => 'required'
+            'name' => 'required|string|max:255',
+            'prenom' => 'nullable|string|max:50',
+            'email' => 'required|email|max:255|unique:users,email',
+            'password' => 'required|string|min:8',
         ]);
         if ($validator->fails()) {
-            return response()->json($validator->errors(), 404);
+            return response()->json(['success' => false, 'message' => 'Erreur de validation', 'errors' => $validator->errors()], 422);
         }
         $user = new User();
         $user->name = $request->name;
-        $user->prenom = $request->prenom;
+        $user->prenom = $request->input('prenom') ?? '';
         $user->email = $request->email;
         $user->password = bcrypt($request->password);
         $user->save();
@@ -229,6 +240,13 @@ class UserController extends Controller
     }
     public function login(Request $request)
     {
+        $validator = Validator::make($request->all(), [
+            'email' => 'required|email',
+            'password' => 'required|string',
+        ]);
+        if ($validator->fails()) {
+            return response()->json(['success' => false, 'message' => 'Erreur de validation', 'errors' => $validator->errors()], 422);
+        }
         if (Auth::attempt(['email' => $request->email, 'password' => $request->password])) {
             $user = Auth::user();
             $token = $user->createToken("LaravelPassportToken")->accessToken;
@@ -241,11 +259,7 @@ class UserController extends Controller
     }
     public function logout(Request $request)
     {
-        $user = Auth::user();
-        $user->isconnected = 0;
-        $user->save();
-        $token = $request->user()->token();
-        $token->revoke();
+        optional($request->user()?->token())->revoke();
         return response()->json(['message' => 'deconnexion reussie'], 200);
     }
     /**

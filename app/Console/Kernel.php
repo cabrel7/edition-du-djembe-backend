@@ -12,9 +12,8 @@ class Kernel extends ConsoleKernel
      */
     protected function schedule(Schedule $schedule): void
     {
-        $schedule->command('subscriptions:notify-expiring')->dailyAt('08:00');
-
-        // $schedule->command('inspire')->hourly();
+        // Désactivé : commande inexistante (modèles Subscription/Notification absents) → crash quotidien
+        // $schedule->command('subscriptions:notify-expiring')->dailyAt('08:00');
     }
 
     /**

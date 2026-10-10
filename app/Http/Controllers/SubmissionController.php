@@ -3,8 +3,12 @@
 
 namespace App\Http\Controllers;
 
+use App\Mail\SubmissionReceived;
+use App\Mail\SubmissionReply;
 use App\Models\Submission;
+use App\Support\UploadConstraints;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Log;
@@ -18,7 +22,7 @@ class SubmissionController extends Controller
      */
     public function store(Request $request)
     {
-        Log::info('Nouvelle soumission reçue', ['email' => $request->email]);
+        Log::info('Nouvelle soumission reçue');
         
         // Validation des données
         $validator = Validator::make($request->all(), [
@@ -51,16 +55,15 @@ class SubmissionController extends Controller
             // Gestion du fichier
             if ($request->hasFile('file')) {
                 $file = $request->file('file');
-                
-                // Générer un nom de fichier unique
-                $originalName = $file->getClientOriginalName();
-                // $extension = $file->getClientOriginalExtension();
-              $fileName = Str::random(20) . '.' . $file->getClientOriginalExtension();
-                
-                // Stocker le fichier dans //app/public/submissions
-                $filePath = $file->move(public_path('/submissions'), $fileName);
-                
-                if (!$filePath) {
+                $originalName = basename($file->getClientOriginalName());
+
+                // Nom unique, extension forcée côté serveur (jamais l'extension client)
+                $fileName = Str::random(20) . '.' . UploadConstraints::PDF_MIMES;
+
+                // Stocker le fichier HORS web root (storage/app/submissions)
+                $stored = Storage::disk('local')->putFileAs(UploadConstraints::SUBMISSIONS_DIR, $file, $fileName);
+
+                if ($stored === false) {
                     throw new \Exception('Erreur lors du stockage du fichier');
                 }
                 
@@ -87,8 +90,15 @@ class SubmissionController extends Controller
                     'author' => $submission->author
                 ]);
 
-                // Optionnel : Envoyer un email de confirmation
-                // $this->sendConfirmationEmail($submission);
+                // Accusé de réception par email (non bloquant : échec SMTP ≠ échec soumission)
+                try {
+                    Mail::to($submission->email)->send(new SubmissionReceived($submission));
+                } catch (\Exception $mailException) {
+                    Log::warning('Échec envoi accusé de réception', [
+                        'submission_id' => $submission->id,
+                        'error' => $mailException->getMessage(),
+                    ]);
+                }
 
                 return response()->json([
                     'success' => true,
@@ -113,8 +123,7 @@ class SubmissionController extends Controller
 
             return response()->json([
                 'success' => false,
-                'message' => 'Une erreur est survenue lors de l\'envoi de votre soumission.',
-                'error' => config('app.debug') ? $e->getMessage() : null
+                'message' => 'Une erreur est survenue lors de l\'envoi de votre soumission.'
             ], 500);
         }
     }
@@ -136,8 +145,8 @@ class SubmissionController extends Controller
         }
 
         try {
-            // Récupérer les paramètres de filtrage
-            $perPage = $request->get('per_page', 20);
+            // Récupérer les paramètres de filtrage (per_page borné : DoS ?per_page=999999)
+            $perPage = min(max((int) $request->get('per_page', 20), 1), 50);
             $page = $request->get('page', 1);
             $type = $request->get('type');
             $status = $request->get('status');
@@ -353,14 +362,22 @@ class SubmissionController extends Controller
         try {
             $submission = Submission::find($id);
 
-           
+            if (!$submission) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Soumission non trouvée'
+                ], 404);
+            }
 
-            $filePath = public_path('/submissions/' . $submission->file_path);
+            $storagePath = storage_path('app/' . UploadConstraints::SUBMISSIONS_DIR . '/' . $submission->file_path);
+            $legacyPath = public_path(UploadConstraints::SUBMISSIONS_DIR . '/' . $submission->file_path);
 
-            if (!file_exists($filePath)) {
+            $filePath = file_exists($storagePath) ? $storagePath : (file_exists($legacyPath) ? $legacyPath : null);
+
+            if ($filePath === null) {
                 Log::error('Fichier non trouvé', [
                     'submission_id' => $id,
-                    'file_path' => $filePath
+                    'file_path' => $submission->file_path
                 ]);
 
                 return response()->json([
@@ -419,10 +436,17 @@ class SubmissionController extends Controller
                 ], 404);
             }
 
-            // Supprimer le fichier physique
-            $filePath = storage_path('app/public/' . $submission->file_path);
-            if (file_exists($filePath)) {
-                unlink($filePath);
+            // Supprimer le fichier physique (nouveau chemin storage/app/submissions, fallback legacy public/submissions)
+            $candidates = [
+                storage_path('app/' . UploadConstraints::SUBMISSIONS_DIR . '/' . $submission->file_path),
+                public_path(UploadConstraints::SUBMISSIONS_DIR . '/' . $submission->file_path),
+            ];
+
+            foreach ($candidates as $filePath) {
+                if (file_exists($filePath)) {
+                    unlink($filePath);
+                    break;
+                }
             }
 
             // Supprimer l'enregistrement de la base de données
@@ -531,8 +555,83 @@ class SubmissionController extends Controller
 
             return response()->json([
                 'success' => false,
-                'error' => $e->getMessage(),
                 'message' => 'Erreur lors de la récupération des statistiques'
+            ], 500);
+        }
+    }
+
+    /**
+     * Envoyer un email à l'auteur d'une soumission (admin)
+     * POST /api/admin/submissions/{id}/send-email
+     */
+    public function sendEmail(Request $request, $id)
+    {
+        $user = auth()->user();
+
+        if (!$user || $user->role != 1) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Non autorisé'
+            ], 401);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'subject' => 'required|string|max:200',
+            'message' => 'required|string|max:5000',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Erreur de validation',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        try {
+            $submission = Submission::find($id);
+
+            if (!$submission) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Soumission non trouvée'
+                ], 404);
+            }
+
+            if (!$submission->email) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Cette soumission n\'a pas d\'adresse email'
+                ], 422);
+            }
+
+            Mail::to($submission->email)->send(new SubmissionReply(
+                $submission,
+                $request->subject,
+                $request->message
+            ));
+
+            Log::info('Email envoyé à un soumissionnaire', [
+                'submission_id' => $submission->id,
+                'to' => $submission->email,
+                'subject' => $request->subject,
+                'admin' => $user->email
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Email envoyé avec succès'
+            ], 200);
+
+        } catch (\Exception $e) {
+            Log::error('Erreur lors de l\'envoi de l\'email', [
+                'submission_id' => $id,
+                'error' => $e->getMessage()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Impossible d\'envoyer l\'email. Vérifiez la configuration SMTP.'
             ], 500);
         }
     }

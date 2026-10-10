@@ -109,11 +109,11 @@ class Submission extends Model
     }
 
     /**
-     * Accesseur : URL publique du fichier
+     * Accesseur : URL du fichier (endpoint download admin, fichier hors web root)
      */
     public function getFileUrlAttribute()
     {
-        return asset('storage/' . $this->file_path);
+        return 'admin/submissions/' . $this->id . '/download';
     }
 
     /**

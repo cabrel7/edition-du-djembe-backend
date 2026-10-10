@@ -37,7 +37,7 @@ class Service extends Model
     // Relation avec les témoignages
     public function testimonials()
     {
-        return $this->hasMany(comment::class);
+        return $this->hasMany(Comment::class);
     }
 
     // Scope pour les services actifs

@@ -15,9 +15,7 @@
         "laravel/passport": "^11.0",
         "laravel/sanctum": "^3.2",
         "laravel/tinker": "^2.8",
-        "pusher/pusher-php-server": "^7.2",
-         "tomatophp/laravel-agora": "^1.0"
-
+        "pusher/pusher-php-server": "^7.2"
     },
     "require-dev": {
         "fakerphp/faker": "^1.9.1",
@@ -73,11 +71,5 @@
         }
     },
     "minimum-stability": "dev",
-     "prefer-stable": true,
-  "repositories": [
-    {
-      "type": "vcs",
-      "url": "https://github.com/AgoraIO-Community/agora-token-builder"
-    }
-  ]
+    "prefer-stable": true
 }

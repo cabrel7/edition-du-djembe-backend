@@ -4,12 +4,15 @@ namespace App\Http\Controllers;
 
 use App\Models\Team_members;
 use App\Models\Partners;
+use App\Support\UploadConstraints;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 
 class TeamPartnerController extends Controller
 {
+    use \App\Http\Controllers\Concerns\HandlesSafeUploads;
+
     // ==================== TEAM MEMBERS ====================
     
     /**
@@ -62,7 +65,7 @@ class TeamPartnerController extends Controller
             'role' => 'required|string|max:100',
             'email' => 'nullable|email|max:255',
             'bio' => 'nullable|string',
-            'photo' => 'nullable|image|mimes:jpg,jpeg,png,gif|max:2048',
+            'photo' => 'nullable|image|mimes:' . UploadConstraints::PARTNER_IMAGE_MIMES . '|max:' . UploadConstraints::MAX_IMAGE_KB,
             'display_order' => 'nullable|integer',
             // 'is_active' => 'nullable|boolean',
             'social_links' => 'nullable|array'
@@ -94,11 +97,11 @@ class TeamPartnerController extends Controller
                 // }
                 
                 $file = $request->file('photo');
-                $filename = time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
+                $filename = time() . '_' . uniqid() . '.' . $this->safeExt($file, UploadConstraints::PARTNER_IMAGE_MIMES);
                  $file->move(public_path('/team'), $filename);
                 $data['photo'] = $filename;
             }
-            
+
             $teamMember->update($data);
             
             return response()->json([
@@ -111,11 +114,11 @@ class TeamPartnerController extends Controller
             // Gérer l'upload de la photo
             if ($request->hasFile('photo')) {
                 $file = $request->file('photo');
-                $filename = time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
+                $filename = time() . '_' . uniqid() . '.' . $this->safeExt($file, UploadConstraints::PARTNER_IMAGE_MIMES);
                  $file->move(public_path('/team'), $filename);
                 $data['photo'] = $filename;
             }
-            
+
             $teamMember = Team_members::create($data);
             
             return response()->json([
@@ -197,7 +200,7 @@ class TeamPartnerController extends Controller
             'website' => 'nullable|url|max:255',
             'description' => 'nullable|string',
             'type' => 'nullable|string|max:100',
-            'image' => 'nullable|image|mimes:jpg,jpeg,png,gif,svg|max:2048',
+            'image' => 'nullable|image|mimes:' . UploadConstraints::PARTNER_IMAGE_MIMES . '|max:' . UploadConstraints::MAX_IMAGE_KB,
             'display_order' => 'nullable|integer',
             // 'is_active' => 'nullable|boolean'
         ]);
@@ -224,11 +227,11 @@ class TeamPartnerController extends Controller
                 // }
                 
                 $file = $request->file('image');
-                $filename = time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
+                $filename = time() . '_' . uniqid() . '.' . $this->safeExt($file, UploadConstraints::PARTNER_IMAGE_MIMES);
                   $file->move(public_path('/partners'), $filename);
                 $data['image'] = $filename;
             }
-            
+
             $partner->update($data);
             
             return response()->json([
@@ -241,11 +244,11 @@ class TeamPartnerController extends Controller
             // Gérer l'upload du logo
             if ($request->hasFile('image')) {
                 $file = $request->file('image');
-                $filename = time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
+                $filename = time() . '_' . uniqid() . '.' . $this->safeExt($file, UploadConstraints::PARTNER_IMAGE_MIMES);
                 $file->move(public_path('/partners'), $filename);
                 $data['image'] = $filename;
             }
-            
+
             $partner = Partners::create($data);
             
             return response()->json([

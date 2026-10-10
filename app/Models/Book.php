@@ -21,6 +21,7 @@ class Book extends Model
         'price',
         'slug',
         'isbn',
+        'amazon_url',
         'pages',
         'stock_quantity',
         'language',

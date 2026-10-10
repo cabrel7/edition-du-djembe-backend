@@ -3,39 +3,74 @@
 namespace App\Http\Controllers;
 
 use App\Models\Article;
-use App\Models\domaine as Domaine;
+use App\Models\Domaine;
 use App\Models\User;
 use App\Models\Service;
 use App\Models\Categorie;
 use App\Models\Service_request;
-use App\Models\order;
+use App\Models\Order;
 use App\Models\Book;
 use App\Models\Video;
 use App\Models\Memoir;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\Rule;
 
 use Illuminate\Support\Facades\Log;
 class AdminController extends Controller
 {
- public function saveVideo(Request $request)
-    {
-        $data = $request->only(['title', 'description', 'video_url', 'status']);
+    use \App\Http\Controllers\Concerns\HandlesSafeUploads;
 
-        if ($request->hasFile('thumbnail')) {
-            $file = $request->file('thumbnail');
-            $filename = Str::random(20) . '.' . $file->getClientOriginalExtension();
-            $file->move(public_path('/video'), $filename);
-            $data['thumbnail'] = $filename;
+    /**
+     * Retourne uniquement les clés RÉELLEMENT présentes dans la requête
+     * (les mises à jour partielles ne doivent pas écraser les autres colonnes
+     * avec null — comportement piégeux de Request::only()).
+     */
+    private function onlyPresent(Request $request, array $keys): array
+    {
+        return array_filter(
+            $request->only($keys),
+            fn ($key) => $request->exists($key),
+            ARRAY_FILTER_USE_KEY
+        );
+    }
+
+    public function saveVideo(Request $request)
+    {
+        $isUpdate = (bool) $request->id;
+
+        $validator = Validator::make($request->all(), [
+            'id' => 'nullable|integer',
+            'title' => ($isUpdate ? 'nullable' : 'required') . '|string|max:255',
+            'description' => ($isUpdate ? 'nullable' : 'required') . '|string|max:5000',
+            'video_url' => ($isUpdate ? 'nullable' : 'required') . '|url|max:500',
+            'thumbnail' => ($isUpdate ? 'nullable' : 'required') . '|file|image|mimes:' . \App\Support\UploadConstraints::IMAGE_MIMES . '|max:' . \App\Support\UploadConstraints::MAX_IMAGE_KB,
+            'status' => 'nullable|integer|in:0,1,2',
+        ], $this->validationMessages());
+
+        if ($validator->fails()) {
+            return response()->json(['success' => false, 'message' => 'Erreur de validation', 'errors' => $validator->errors()], 422);
         }
 
-        $video = Video::updateOrCreate(
-            ['id' => $request->id],
-            $data
-        );
+        try {
+            $data = $this->onlyPresent($request, ['title', 'description', 'video_url', 'status']);
 
-        return response()->json(['message' => 'Video saved', 'video' => $video]);
+            if ($request->hasFile('thumbnail')) {
+                $data['thumbnail'] = $this->storeUpload($request->file('thumbnail'), 'video', \App\Support\UploadConstraints::IMAGE_MIMES)['filename'];
+            }
+
+            $video = Video::updateOrCreate(
+                ['id' => $request->id],
+                $data
+            );
+
+            return response()->json(['message' => 'Vidéo enregistrée', 'video' => $video], 200);
+        } catch (\Exception $e) {
+            Log::error('Erreur lors de l\'enregistrement de la vidéo', ['error' => $e->getMessage()]);
+
+            return response()->json(['message' => 'Erreur lors de l\'enregistrement de la vidéo'], 500);
+        }
     }
 
 
@@ -123,28 +158,65 @@ class AdminController extends Controller
 
     public function saveArticle(Request $request)
     {
-        $user = auth()->user();
-        if (!$user || $user->role != 1) return response()->json(['message' => 'Unauthorized'], 401);
+        $isUpdate = (bool) $request->id;
 
-        $data = $request->only([
-            'title','excerpt','content','published_date','author','slug',
-            'meta_title','meta_description','tags','views_count',
-            'reading_time','status','featured'
-        ]);
+        $validator = Validator::make($request->all(), [
+            'id' => 'nullable|integer',
+            'title' => 'required|string|max:255',
+            'excerpt' => ($isUpdate ? 'nullable' : 'required') . '|string|max:1000',
+            'content' => ($isUpdate ? 'nullable' : 'required') . '|string',
+            'image' => 'nullable|file|image|mimes:' . \App\Support\UploadConstraints::IMAGE_MIMES . '|max:' . \App\Support\UploadConstraints::MAX_IMAGE_KB,
+            'published_date' => 'nullable|date',
+            'author' => 'nullable|string|max:255',
+            'meta_title' => 'nullable|string|max:255',
+            'meta_description' => 'nullable|string|max:1000',
+            'tags' => 'nullable|array',
+            'views_count' => 'nullable|integer|min:0',
+            'reading_time' => 'nullable|integer|min:0',
+            'status' => 'nullable|integer|in:0,1,2',
+            'featured' => 'nullable|boolean',
+        ], $this->validationMessages());
 
-        if ($request->hasFile('image')) {
-            $file = $request->file('image');
-            $filename = Str::random(20) . '.' . $file->getClientOriginalExtension();
-            $file->move(public_path('/articles'), $filename);
-            $data['image'] = $filename;
+        if ($validator->fails()) {
+            return response()->json(['success' => false, 'message' => 'Erreur de validation', 'errors' => $validator->errors()], 422);
         }
 
-        $article = Article::updateOrCreate(
-            ['id' => $request->id],
-            $data
-        );
+        try {
+            $data = $this->onlyPresent($request, [
+                'title','excerpt','content','published_date','author',
+                'meta_title','meta_description','tags','views_count',
+                'reading_time','status','featured'
+            ]);
 
-        return response()->json(['message' => 'Article saved successfully','article' => $article]);
+            if ($request->hasFile('image')) {
+                $data['image'] = $this->storeUpload($request->file('image'), 'articles', \App\Support\UploadConstraints::IMAGE_MIMES)['filename'];
+            }
+
+            if ($isUpdate) {
+                $article = Article::findOrFail($request->id);
+
+                if (empty($article->slug)) {
+                    $data['slug'] = $this->uniqueSlug('articles', $data['title'] ?? $article->title);
+                }
+
+                $article->update($data);
+            } else {
+                $data['slug'] = $this->uniqueSlug('articles', $data['title']);
+                $article = Article::create($data);
+            }
+
+            return response()->json(['message' => 'Article enregistré avec succès','article' => $article], 200);
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json(['success' => false, 'message' => 'Article non trouvé'], 404);
+        } catch (\Illuminate\Database\QueryException $e) {
+            Log::error('Erreur base de données lors de l\'enregistrement de l\'article', ['error' => $e->getMessage()]);
+
+            return response()->json(['success' => false, 'message' => 'Erreur lors de l\'enregistrement de l\'article'], 500);
+        } catch (\Exception $e) {
+            Log::error('Erreur lors de l\'enregistrement de l\'article', ['error' => $e->getMessage()]);
+
+            return response()->json(['success' => false, 'message' => 'Erreur lors de l\'enregistrement de l\'article'], 500);
+        }
     }
 
     public function deleteArticle($id)
@@ -155,44 +227,84 @@ class AdminController extends Controller
 
     public function saveBook(Request $request)
     {
-        $user = auth()->user();
-        if (!$user || $user->role != 1) return response()->json(['message' => 'Unauthorized'], 401);
+        $isUpdate = (bool) $request->id;
 
-        $data = $request->only([
-            'title','author','description','category','price','isbn','slug',
-            'pages','stock_quantity','language','publisher','edition',
-            'status','published_date'
-        ]);
+        $validator = Validator::make($request->all(), [
+            'id' => 'nullable|integer',
+            'title' => ($isUpdate ? 'nullable' : 'required') . '|string|max:255',
+            'author' => ($isUpdate ? 'nullable' : 'required') . '|string|max:255',
+            'category' => ($isUpdate ? 'nullable' : 'required') . '|integer|exists:categories,id',
+            'description' => ($isUpdate ? 'nullable' : 'required') . '|string|max:10000',
+            'price' => ($isUpdate ? 'nullable' : 'required') . '|numeric|min:0',
+            'isbn' => array_filter([
+                $isUpdate ? 'nullable' : 'required',
+                'string',
+                'max:255',
+                Rule::unique('books', 'isbn')->ignore($request->id),
+            ]),
+            'amazon_url' => 'nullable|url|max:500',
+            'pages' => ($isUpdate ? 'nullable' : 'required') . '|integer|min:1',
+            'document' => ($isUpdate ? 'nullable' : 'required') . '|file|mimes:' . \App\Support\UploadConstraints::DOCUMENT_MIMES . '|max:' . \App\Support\UploadConstraints::MAX_DOCUMENT_KB,
+            'extraitdocument' => ($isUpdate ? 'nullable' : 'required') . '|file|mimes:' . \App\Support\UploadConstraints::DOCUMENT_MIMES . '|max:' . \App\Support\UploadConstraints::MAX_DOCUMENT_KB,
+            'cover' => 'nullable|file|image|mimes:' . \App\Support\UploadConstraints::IMAGE_MIMES . '|max:' . \App\Support\UploadConstraints::MAX_IMAGE_KB,
+            'stock_quantity' => 'nullable|integer|min:0',
+            'language' => 'nullable|string|max:10',
+            'publisher' => 'nullable|string|max:255',
+            'edition' => 'nullable|string|max:255',
+            'status' => 'nullable|boolean',
+            'published_date' => 'nullable|date',
+        ], $this->validationMessages());
 
-        if ($request->hasFile('cover')) {
-            $file = $request->file('cover');
-            $filename = Str::random(20) . '.' . $file->getClientOriginalExtension();
-            $file->move(public_path('/books/covers'), $filename);
-            $data['cover'] = $filename;
+        if ($validator->fails()) {
+            return response()->json(['success' => false, 'message' => 'Erreur de validation', 'errors' => $validator->errors()], 422);
         }
 
-        if ($request->hasFile('document')) {
-            $file = $request->file('document');
-            $extension = $file->getClientOriginalExtension();
-            $filename = Str::random(20) . '.' . $extension;
-            $file->move(public_path('/books/documents'), $filename);
-            $data['document'] = $filename;
-            $data['extension'] = $extension;
+        try {
+            $data = $this->onlyPresent($request, [
+                'title','author','description','category','price','isbn',
+                'amazon_url','pages','stock_quantity','language','publisher','edition',
+                'status','published_date'
+            ]);
+
+            if ($request->hasFile('cover')) {
+                $data['cover'] = $this->storeUpload($request->file('cover'), 'books/covers', \App\Support\UploadConstraints::IMAGE_MIMES)['filename'];
+            }
+
+            if ($request->hasFile('document')) {
+                $upload = $this->storeUpload($request->file('document'), 'books/documents', \App\Support\UploadConstraints::DOCUMENT_MIMES);
+                $data['document'] = $upload['filename'];
+                $data['extension'] = $upload['extension'];
+            }
+
+            if ($request->hasFile('extraitdocument')) {
+                $data['extraitdocument'] = $this->storeUpload($request->file('extraitdocument'), 'books/extrait_documents', \App\Support\UploadConstraints::DOCUMENT_MIMES)['filename'];
+            }
+
+            if ($isUpdate) {
+                $book = Book::findOrFail($request->id);
+
+                if (empty($book->slug)) {
+                    $data['slug'] = $this->uniqueSlug('books', $data['title'] ?? $book->title);
+                }
+
+                $book->update($data);
+            } else {
+                $data['slug'] = $this->uniqueSlug('books', $data['title']);
+                $book = Book::create($data);
+            }
+
+            return response()->json(['message' => 'Livre enregistré avec succès','book' => $book], 200);
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json(['success' => false, 'message' => 'Livre non trouvé'], 404);
+        } catch (\Illuminate\Database\QueryException $e) {
+            Log::error('Erreur base de données lors de l\'enregistrement du livre', ['error' => $e->getMessage()]);
+
+            return response()->json(['success' => false, 'message' => 'Erreur lors de l\'enregistrement du livre'], 500);
+        } catch (\Exception $e) {
+            Log::error('Erreur lors de l\'enregistrement du livre', ['error' => $e->getMessage()]);
+
+            return response()->json(['success' => false, 'message' => 'Erreur lors de l\'enregistrement du livre'], 500);
         }
-
-        if ($request->hasFile('extraitdocument')) {
-            $file = $request->file('extraitdocument');
-            $filename = Str::random(20) . '.' . $file->getClientOriginalExtension();
-            $file->move(public_path('/books/extrait_documents'), $filename);
-            $data['extraitdocument'] = $filename;
-        }
-
-        $book = Book::updateOrCreate(
-            ['id' => $request->id],
-            $data
-        );
-
-        return response()->json(['message' => 'Book saved successfully','book' => $book]);
     }
 
     public function deleteMemoir($id)
@@ -203,54 +315,109 @@ class AdminController extends Controller
 
     public function saveMemoir(Request $request)
     {
-        $data = $request->only([
-            'title','author','university','domain','year','abstract',
-            'slug','supervisor','defense_date','grade','status'
-        ]);
+        $isUpdate = (bool) $request->id;
 
-        $data['keywords'] = json_encode($request->keywords);
+        $validator = Validator::make($request->all(), [
+            'id' => 'nullable|integer',
+            'title' => 'required|string|max:255',
+            'author' => ($isUpdate ? 'nullable' : 'required') . '|string|max:255',
+            'university' => ($isUpdate ? 'nullable' : 'required') . '|string|max:255',
+            'domain' => ($isUpdate ? 'nullable' : 'required') . '|integer|exists:domaines,id',
+            'year' => ($isUpdate ? 'nullable' : 'required') . '|integer|between:1900,2100',
+            'abstract' => ($isUpdate ? 'nullable' : 'required') . '|string|max:10000',
+            'keywords' => 'nullable|array',
+            'supervisor' => 'nullable|string|max:255',
+            'defense_date' => 'nullable|date',
+            'grade' => 'nullable|string|max:100',
+            'status' => 'nullable|integer|in:0,1,2',
+            'cover' => 'nullable|file|image|mimes:' . \App\Support\UploadConstraints::IMAGE_MIMES . '|max:' . \App\Support\UploadConstraints::MAX_IMAGE_KB,
+            'document' => 'nullable|file|mimes:' . \App\Support\UploadConstraints::DOCUMENT_MIMES . '|max:' . \App\Support\UploadConstraints::MAX_DOCUMENT_KB,
+        ], $this->validationMessages());
 
-        if ($request->hasFile('cover')) {
-            $file = $request->file('cover');
-            $filename = Str::random(20) . '.' . $file->getClientOriginalExtension();
-            $file->move(public_path('/memoirs/covers'), $filename);
-            $data['cover'] = $filename;
+        if ($validator->fails()) {
+            return response()->json(['success' => false, 'message' => 'Erreur de validation', 'errors' => $validator->errors()], 422);
         }
 
-        if ($request->hasFile('document')) {
-            $file = $request->file('document');
-            $extension = $file->getClientOriginalExtension();
-            $filename = Str::random(20) . '.' . $extension;
-            $file->move(public_path('/memoirs/documents'), $filename);
-            $data['document'] = $filename;
-            $data['extension'] = $extension;
+        try {
+            $data = $this->onlyPresent($request, [
+                'title','author','university','domain','year','abstract',
+                'supervisor','defense_date','grade','status'
+            ]);
+
+            $data['keywords'] = $request->keywords !== null ? json_encode($request->keywords) : null;
+
+            if ($request->hasFile('cover')) {
+                $data['cover'] = $this->storeUpload($request->file('cover'), 'memoirs/covers', \App\Support\UploadConstraints::IMAGE_MIMES)['filename'];
+            }
+
+            if ($request->hasFile('document')) {
+                $upload = $this->storeUpload($request->file('document'), 'memoirs/documents', \App\Support\UploadConstraints::DOCUMENT_MIMES);
+                $data['document'] = $upload['filename'];
+                $data['extension'] = $upload['extension'];
+            }
+
+            if ($isUpdate) {
+                $memoir = Memoir::findOrFail($request->id);
+
+                if (empty($memoir->slug)) {
+                    $data['slug'] = $this->uniqueSlug('memoirs', $data['title'] ?? $memoir->title);
+                }
+
+                $memoir->update($data);
+            } else {
+                $data['slug'] = $this->uniqueSlug('memoirs', $data['title']);
+                $memoir = Memoir::create($data);
+            }
+
+            return response()->json(['message' => 'Mémoire enregistré','memoir' => $memoir], 200);
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json(['success' => false, 'message' => 'Mémoire non trouvé'], 404);
+        } catch (\Illuminate\Database\QueryException $e) {
+            Log::error('Erreur base de données lors de l\'enregistrement du mémoire', ['error' => $e->getMessage()]);
+
+            return response()->json(['success' => false, 'message' => 'Erreur lors de l\'enregistrement du mémoire'], 500);
+        } catch (\Exception $e) {
+            Log::error('Erreur lors de l\'enregistrement du mémoire', ['error' => $e->getMessage()]);
+
+            return response()->json(['success' => false, 'message' => 'Erreur lors de l\'enregistrement du mémoire'], 500);
         }
-
-        $memoir = Memoir::updateOrCreate(
-            ['id' => $request->id],
-            $data
-        );
-
-        return response()->json(['message' => 'Memoir saved','memoir' => $memoir]);
     }
 
     public function saveService(Request $request)
     {
-        $data = $request->only(['title','description','is_active','price_range']);
+        $isUpdate = (bool) $request->id;
 
-        if ($request->hasFile('image')) {
-            $file = $request->file('image');
-            $filename = Str::random(20) . '.' . $file->getClientOriginalExtension();
-            $file->move(public_path('/service'), $filename);
-            $data['image'] = $filename;
+        $validator = Validator::make($request->all(), [
+            'id' => 'nullable|integer',
+            'title' => ($isUpdate ? 'nullable' : 'required') . '|string|max:255',
+            'description' => ($isUpdate ? 'nullable' : 'required') . '|string|max:5000',
+            'price_range' => 'nullable|string|max:100',
+            'is_active' => 'nullable|boolean',
+            'image' => 'nullable|file|image|mimes:' . \App\Support\UploadConstraints::IMAGE_MIMES . '|max:' . \App\Support\UploadConstraints::MAX_IMAGE_KB,
+        ], $this->validationMessages());
+
+        if ($validator->fails()) {
+            return response()->json(['success' => false, 'message' => 'Erreur de validation', 'errors' => $validator->errors()], 422);
         }
 
-        $service = Service::updateOrCreate(
-            ['id' => $request->id],
-            $data
-        );
+        try {
+            $data = $this->onlyPresent($request, ['title','description','is_active','price_range']);
 
-        return response()->json(['message' => 'Service saved','service' => $service]);
+            if ($request->hasFile('image')) {
+                $data['image'] = $this->storeUpload($request->file('image'), 'service', \App\Support\UploadConstraints::IMAGE_MIMES)['filename'];
+            }
+
+            $service = Service::updateOrCreate(
+                ['id' => $request->id],
+                $data
+            );
+
+            return response()->json(['message' => 'Service enregistré','service' => $service], 200);
+        } catch (\Exception $e) {
+            Log::error('Erreur lors de l\'enregistrement du service', ['error' => $e->getMessage()]);
+
+            return response()->json(['success' => false, 'message' => 'Erreur lors de l\'enregistrement du service'], 500);
+        }
     }
 
     public function deleteService($id)
@@ -271,7 +438,7 @@ class AdminController extends Controller
     {
         $categorie = Categorie::updateOrCreate(
             ['id' => $request->id],
-            $request->only(['name','type','description','is_active'])
+            $this->onlyPresent($request, ['name','type','description','is_active'])
         );
 
         return response()->json(['message' => 'Categorie saved','categorie' => $categorie]);
@@ -279,15 +446,33 @@ class AdminController extends Controller
 
     public function deleteCategorie($id)
     {
-        Categorie::findOrFail($id)->delete();
-        return response()->json(['message' => 'Categorie deleted']);
+        try {
+            $categorie = Categorie::findOrFail($id);
+
+            if (Book::withTrashed()->where('category', $id)->exists()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Impossible de supprimer cette catégorie : des livres y sont encore rattachés.'
+                ], 409);
+            }
+
+            $categorie->delete();
+
+            return response()->json(['message' => 'Categorie deleted']);
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json(['success' => false, 'message' => 'Catégorie non trouvée'], 404);
+        } catch (\Exception $e) {
+            Log::error('Erreur lors de la suppression de la catégorie', ['id' => $id, 'error' => $e->getMessage()]);
+
+            return response()->json(['success' => false, 'message' => 'Erreur lors de la suppression de la catégorie'], 500);
+        }
     }
 
     public function saveDomaine(Request $request)
     {
         $domaine = Domaine::updateOrCreate(
             ['id' => $request->id],
-            $request->only(['name','description','is_active'])
+            $this->onlyPresent($request, ['name','description','is_active'])
         );
 
         return response()->json(['message' => 'Domaine saved','domaine' => $domaine]);
@@ -295,8 +480,26 @@ class AdminController extends Controller
 
     public function deleteDomaine($id)
     {
-        Domaine::findOrFail($id)->delete();
-        return response()->json(['message' => 'Domaine deleted']);
+        try {
+            $domaine = Domaine::findOrFail($id);
+
+            if (Memoir::where('domain', $id)->exists()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Impossible de supprimer ce domaine : des mémoires y sont encore rattachés.'
+                ], 409);
+            }
+
+            $domaine->delete();
+
+            return response()->json(['message' => 'Domaine deleted']);
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json(['success' => false, 'message' => 'Domaine non trouvé'], 404);
+        } catch (\Exception $e) {
+            Log::error('Erreur lors de la suppression du domaine', ['id' => $id, 'error' => $e->getMessage()]);
+
+            return response()->json(['success' => false, 'message' => 'Erreur lors de la suppression du domaine'], 500);
+        }
     }
      public function deleteBook($id)
     {

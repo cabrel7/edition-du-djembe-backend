@@ -92,7 +92,7 @@ class PressReview extends Model
     public function getCoverUrlAttribute()
     {
         if ($this->cover_image) {
-            return asset('storage/' . $this->cover_image);
+            return asset($this->cover_image);
         }
         return asset('images/default-press-review.jpg');
     }
@@ -102,9 +102,9 @@ class PressReview extends Model
         if (!$this->gallery_images) {
             return [];
         }
-        
+
         return array_map(function ($image) {
-            return asset('storage/' . $image);
+            return asset($image);
         }, $this->gallery_images);
     }
 

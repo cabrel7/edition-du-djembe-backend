@@ -9,10 +9,12 @@ class TrustProxies extends Middleware
 {
     /**
      * The trusted proxies for this application.
+     * Derrière nginx (prod) : '*' pour que rate limiting et détection HTTPS
+     * utilisent la vraie IP (X-Forwarded-For réécrit par nginx).
      *
      * @var array<int, string>|string|null
      */
-    protected $proxies;
+    protected $proxies = '*';
 
     /**
      * The headers that should be used to detect proxies.

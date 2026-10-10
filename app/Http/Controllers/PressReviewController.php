@@ -4,13 +4,17 @@
 namespace App\Http\Controllers;
 
 use App\Models\PressReview;
+use App\Support\UploadConstraints;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Log;
 class PressReviewController extends Controller
 {
+    use \App\Http\Controllers\Concerns\HandlesSafeUploads;
+
     // ==================== PARTIE PUBLIQUE ====================
 
     /**
@@ -270,9 +274,9 @@ class PressReviewController extends Controller
             'source' => 'nullable|string|max:255',
             'source_url' => 'nullable|url|max:500',
             'publication_date' => 'nullable|date',
-            'cover_image' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:5120', // 5MB
-            'gallery_images.*' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:5120',
-            'documents.*' => 'nullable|file|mimes:pdf,doc,docx|max:10240', // 10MB
+            'cover_image' => 'nullable|image|mimes:' . UploadConstraints::IMAGE_MIMES . '|max:' . UploadConstraints::MAX_IMAGE_KB,
+            'gallery_images.*' => 'nullable|image|mimes:' . UploadConstraints::IMAGE_MIMES . '|max:' . UploadConstraints::MAX_IMAGE_KB,
+            'documents.*' => 'nullable|file|mimes:' . UploadConstraints::DOCUMENT_MIMES . '|max:' . UploadConstraints::MAX_DOCUMENT_KB,
             'video_url' => 'nullable|url|max:500',
             'audio_url' => 'nullable|url|max:500',
             'category' => 'required|in:interview,critique,reportage,article,autre',
@@ -292,16 +296,23 @@ class PressReviewController extends Controller
         }
 
         try {
-            $data = $request->except(['cover_image', 'gallery_images', 'documents']);
-			$data['is_featured']=$data['is_featured']==true?1:0;
+            $data = $request->only([
+                'title', 'slug', 'subtitle', 'summary', 'content', 'author',
+                'source', 'source_url', 'publication_date', 'video_url', 'audio_url',
+                'category', 'tags', 'is_featured', 'status', 'published_at'
+            ]);
+			$data['is_featured']=!empty($data['is_featured'])?1:0;
+            if (isset($data['content'])) {
+                $data['content'] = $this->sanitizeHtml($data['content']);
+            }
             // Gestion de l'image de couverture
             if ($request->hasFile('cover_image')) {
                 $file = $request->file('cover_image');
-            $filename = str::random(20) . '.' . $file->getClientOriginalExtension();
+            $filename = Str::random(20) . '.' . $this->safeExt($file, UploadConstraints::IMAGE_MIMES);
             $file->move(public_path('press-reviews/covers'), $filename);
             $path = 'press-reviews/covers/' . $filename;
             $data['cover_image'] = $path;
-              
+
             }
 
             // Gestion de la galerie d'images
@@ -309,12 +320,12 @@ class PressReviewController extends Controller
                 $galleryPaths = [];
                 foreach ($request->file('gallery_images') as $image) {
                       $file = $image;
-            $filename = str::random(20) . '.' . $file->getClientOriginalExtension();
+            $filename = Str::random(20) . '.' . $this->safeExt($file, UploadConstraints::IMAGE_MIMES);
             $file->move(public_path('press-reviews/gallery/'), $filename);
             $path = 'press-reviews/gallery/' . $filename;
             $galleryPaths[] = $path;
-                   
-                  
+
+
                 }
                 $data['gallery_images'] = $galleryPaths;
             }
@@ -325,7 +336,7 @@ class PressReviewController extends Controller
 
 foreach ($request->file('documents') as $doc) {
 
-    $filename = Str::random(20) . '.' . $doc->getClientOriginalExtension();
+    $filename = Str::random(20) . '.' . $this->safeExt($doc, UploadConstraints::DOCUMENT_MIMES);
 
     // 🔥 récupérer les infos AVANT le move
     $originalName = $doc->getClientOriginalName();
@@ -361,10 +372,11 @@ foreach ($request->file('documents') as $doc) {
             ], 201);
 
         } catch (\Exception $e) {
+            Log::error('Erreur lors de la création d\'une revue de presse', ['error' => $e->getMessage()]);
+
             return response()->json([
                 'success' => false,
-                'message' => 'Erreur lors de la création',
-                'error' => $e->getMessage()
+                'message' => 'Erreur lors de la création'
             ], 500);
         }
     }
@@ -420,7 +432,14 @@ foreach ($request->file('documents') as $doc) {
         }
 
         try {
-            $data = $request->except(['cover_image', 'gallery_images', 'documents']);
+            $data = $request->only([
+                'title', 'slug', 'subtitle', 'summary', 'content', 'author',
+                'source', 'source_url', 'publication_date', 'video_url', 'audio_url',
+                'category', 'tags', 'is_featured', 'status', 'published_at'
+            ]);
+            if (isset($data['content'])) {
+                $data['content'] = $this->sanitizeHtml($data['content']);
+            }
 
             // Gestion de l'image de couverture
             if ($request->hasFile('cover_image')) {
@@ -433,57 +452,34 @@ foreach ($request->file('documents') as $doc) {
                  
                 }
                     $file = $request->file('cover_image');
-            $filename = str::random(20) . '.' . $file->getClientOriginalExtension();
+            $filename = Str::random(20) . '.' . $this->safeExt($file, UploadConstraints::IMAGE_MIMES);
             $file->move(public_path('press-reviews/covers'), $filename);
             $path = 'press-reviews/covers/' . $filename;
             $data['cover_image'] = $path;
-            
+
             }
 
-            // Gestion de la galerie d'images
+            // Gestion de la galerie d'images (ajout, sans effacer les images existantes)
             if ($request->hasFile('gallery_images')) {
-                // Supprimer les anciennes images
-                if ($pressReview->gallery_images) {
-                    foreach ($pressReview->gallery_images as $oldImage) {
-                    $imagePath = public_path($oldImage);
-                    if (File::exists($imagePath)) {
-                      File::delete($imagePath); // Ou unlink($imagePath);
-                    }                    
-                       }
-                }
-                
-                $galleryPaths = [];
+                $galleryPaths = is_array($pressReview->gallery_images) ? $pressReview->gallery_images : [];
                 foreach ($request->file('gallery_images') as $image) {
 
                     $file = $image;
-            $filename = str::random(20) . '.' . $file->getClientOriginalExtension();
+            $filename = Str::random(20) . '.' . $this->safeExt($file, UploadConstraints::IMAGE_MIMES);
             $file->move(public_path('press-reviews/gallery'), $filename);
             $path = 'press-reviews/gallery/' . $filename;
-                   ;
                     $galleryPaths[] = $path;
                 }
                 $data['gallery_images'] = $galleryPaths;
             }
 
-            // Gestion des documents
+            // Gestion des documents (ajout, sans effacer les documents existants)
             if ($request->hasFile('documents')) {
-                // Supprimer les anciens documents
-                if ($pressReview->documents) {
-                    foreach ($pressReview->documents as $oldDoc) {
-
-                      $docs = public_path($oldDoc['path'] ?? $oldDoc);
-                    if (File::exists($oldDoc['path'] ?? $oldDoc)) {
-                      File::delete($oldDoc['path'] ?? $oldDoc); // Ou unlink($imagePath);
-                    }   
-                       
-                    }
-                }
-                
-               $documentPaths = [];
+               $documentPaths = is_array($pressReview->documents) ? $pressReview->documents : [];
 
 foreach ($request->file('documents') as $doc) {
 
-    $filename = Str::random(20) . '.' . $doc->getClientOriginalExtension();
+    $filename = Str::random(20) . '.' . $this->safeExt($doc, UploadConstraints::DOCUMENT_MIMES);
 
     // 🔥 récupérer les infos AVANT le move
     $originalName = $doc->getClientOriginalName();
@@ -519,10 +515,11 @@ foreach ($request->file('documents') as $doc) {
             ], 200);
 
         } catch (\Exception $e) {
+            Log::error('Erreur lors de la mise à jour d\'une revue de presse', ['id' => $id, 'error' => $e->getMessage()]);
+
             return response()->json([
                 'success' => false,
-                'message' => 'Erreur lors de la mise à jour',
-                'error' => $e->getMessage()
+                'message' => 'Erreur lors de la mise à jour'
             ], 500);
         }
     }
@@ -585,10 +582,11 @@ foreach ($request->file('documents') as $doc) {
             ], 200);
 
         } catch (\Exception $e) {
+            Log::error('Erreur lors de la suppression d\'une revue de presse', ['id' => $id, 'error' => $e->getMessage()]);
+
             return response()->json([
                 'success' => false,
-                'message' => 'Erreur lors de la suppression',
-                'error' => $e->getMessage()
+                'message' => 'Erreur lors de la suppression'
             ], 500);
         }
     }
@@ -693,11 +691,38 @@ foreach ($request->file('documents') as $doc) {
             return response()->json(['errors' => $validator->errors()], 422);
         }
 
-        $path = $request->file('image')->store('press-reviews/editor', 'public');
+        try {
+            $file = $request->file('image');
+            $filename = Str::random(20) . '.' . $this->safeExt($file, UploadConstraints::IMAGE_MIMES);
+            $path = $file->storeAs('press-reviews/editor', $filename, 'public');
+        } catch (\Exception $e) {
+            Log::error('Erreur lors de l\'upload d\'image éditeur', ['error' => $e->getMessage()]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Erreur lors de l\'upload de l\'image'
+            ], 500);
+        }
 
         return response()->json([
             'success' => true,
             'url' => asset('storage/' . $path)
         ], 200);
+    }
+
+    /**
+     * Sanitise un fragment HTML (anti XSS stocké) : tags autorisés,
+     * suppression des handlers d'événements et des URL javascript:.
+     */
+    private function sanitizeHtml(string $html): string
+    {
+        $allowed = '<p><br><h2><h3><h4><strong><em><u><ul><ol><li><a><blockquote><img><span><div><figure><figcaption><table><thead><tbody><tr><td><th>';
+        $clean = strip_tags($html, $allowed);
+        // Retire les handlers on*="..." / on*=...
+        $clean = preg_replace('/\son\w+\s*=\s*("[^"]*"|\'[^\']*\'|[^\s>]+)/i', '', $clean);
+        // Retire les URL javascript: dans href/src
+        $clean = preg_replace('/\s(href|src)\s*=\s*("|\'|\s)*\s*javascript\s*:[^"\'>\s]*/i', ' $1="#"', $clean);
+
+        return $clean;
     }
 }
