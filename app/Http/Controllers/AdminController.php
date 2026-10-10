@@ -162,7 +162,7 @@ class AdminController extends Controller
 
         $validator = Validator::make($request->all(), [
             'id' => 'nullable|integer',
-            'title' => 'required|string|max:255',
+            'title' => ($isUpdate ? 'nullable' : 'required') . '|string|max:255',
             'excerpt' => ($isUpdate ? 'nullable' : 'required') . '|string|max:1000',
             'content' => ($isUpdate ? 'nullable' : 'required') . '|string',
             'image' => 'nullable|file|image|mimes:' . \App\Support\UploadConstraints::IMAGE_MIMES . '|max:' . \App\Support\UploadConstraints::MAX_IMAGE_KB,
@@ -319,7 +319,7 @@ class AdminController extends Controller
 
         $validator = Validator::make($request->all(), [
             'id' => 'nullable|integer',
-            'title' => 'required|string|max:255',
+            'title' => ($isUpdate ? 'nullable' : 'required') . '|string|max:255',
             'author' => ($isUpdate ? 'nullable' : 'required') . '|string|max:255',
             'university' => ($isUpdate ? 'nullable' : 'required') . '|string|max:255',
             'domain' => ($isUpdate ? 'nullable' : 'required') . '|integer|exists:domaines,id',

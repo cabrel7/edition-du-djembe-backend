@@ -28,6 +28,19 @@ class ContentViewTest extends TestCase
             ->assertStatus(404);
     }
 
+    public function test_update_memoir_view_increments_published_only(): void
+    {
+        $memoir = Memoir::factory()->create(['views_count' => 2, 'status' => 1]);
+
+        $this->postJson('/api/updatememoirview', ['id' => $memoir->id])
+            ->assertStatus(200)
+            ->assertJsonPath('views_count', 3);
+
+        $draft = Memoir::factory()->create(['views_count' => 5, 'status' => 0]);
+        $this->postJson('/api/updatememoirview', ['id' => $draft->id])
+            ->assertStatus(404);
+    }
+
     public function test_downloadbook_404_when_file_missing_or_unknown(): void
     {
         $this->getJson('/api/downloadbook/999999')->assertStatus(404);

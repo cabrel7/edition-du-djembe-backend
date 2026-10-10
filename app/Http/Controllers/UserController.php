@@ -54,6 +54,26 @@ class UserController extends Controller
         Article::where('id', $article->id)->increment('views_count');
         return response()->json('success', 200);
     }
+
+    public function updatememoirview(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'id' => 'required|integer',
+        ]);
+        if ($validator->fails()) {
+            return response()->json(['errors' => $validator->errors()], 422);
+        }
+
+        $updated = Memoir::where('id', $request->id)->where('status', 1)->increment('views_count');
+        if (!$updated) {
+            return response()->json(['message' => 'Memoire non trouve'], 404);
+        }
+
+        return response()->json([
+            'message' => 'Vue incrementee',
+            'views_count' => Memoir::where('id', $request->id)->value('views_count'),
+        ], 200);
+    }
     public function downloadbook($id)
     {
         $book = book::where('id', $id)->where('status', 1)->first();

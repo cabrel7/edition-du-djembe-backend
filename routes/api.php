@@ -36,6 +36,7 @@ Route::controller(UserController::class)->group(function () {
     Route::get('/downloadbook/{id}', 'downloadbook');
     Route::get('/getbasedata', 'index');
     route::post('/updatearticleview','updatearticleview');
+    route::post('/updatememoirview','updatememoirview');
 });
 
 
