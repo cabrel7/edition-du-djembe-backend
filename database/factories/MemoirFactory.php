@@ -22,7 +22,7 @@ class MemoirFactory extends Factory
             'year' => fake()->numberBetween(2015, 2026),
             'slug' => Str::slug($title) . '-' . Str::lower(Str::random(6)),
             'abstract' => fake()->paragraphs(2, true),
-            'keywords' => fake()->words(5, true),
+            'keywords' => fake()->words(5),
             'supervisor' => fake()->name(),
             'grade' => fake()->randomElement(['Très bien', 'Bien', 'Passable']),
             'views_count' => fake()->numberBetween(0, 300),

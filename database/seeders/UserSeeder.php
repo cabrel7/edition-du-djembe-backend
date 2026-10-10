@@ -13,15 +13,21 @@ class UserSeeder extends Seeder
      */
     public function run(): void
     {
-        
+        $email = env('ADMIN_MAIL', 'admin@example.com');
+        $password = env('ADMIN_PASSWORD', 'password');
+
+        if (!env('ADMIN_MAIL')) {
+            $this->command?->warn('ADMIN_MAIL absent du .env — compte admin créé avec ' . $email . ' / ' . $password);
+        }
+
         User::updateOrCreate(
-    ['email' => env('ADMIN_MAIL')],
-    [
-        'name' => 'Admin',
-        'password' => bcrypt(env('ADMIN_PASSWORD')),
-        'role' => 1,
-        'prenom' => 'admin',
-    ]
-);
+            ['email' => $email],
+            [
+                'name' => 'Admin',
+                'password' => bcrypt($password),
+                'role' => 1,
+                'prenom' => 'admin',
+            ]
+        );
     }
 }

@@ -34,6 +34,7 @@ class Memoir extends Model
     protected $casts = [
         'year' => 'integer',
         'defense_date' => 'date',
+        'keywords' => 'array',
         'views_count' => 'integer',
         'downloads_count' => 'integer',
         'file_size' => 'integer'
