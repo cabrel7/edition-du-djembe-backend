@@ -1,6 +1,6 @@
 <?php
 use Illuminate\Support\Facades\Route;
-use App\Events\Hello;
+use Illuminate\Support\Facades\DB;
 use App\Http\Controllers\SitemapController;
 
 use App\Http\Controllers\RobotsController;
@@ -22,8 +22,13 @@ Route::get('/robots.txt', [RobotsController::class, 'index']);
 
 Route::get('/sitemap.xml', [SitemapController::class, 'index']);
 
-Route::get('/broadcast',function(){
+// Healthcheck (monitoring / load balancer) — vérifie aussi la base.
+Route::get('/up', function () {
+    try {
+        DB::select('select 1');
+    } catch (\Throwable $e) {
+        return response()->json(['status' => 'degraded'], 503);
+    }
 
-    broadcast(new Hello());
-    return "Event has been sent!";
-});
+    return response()->json(['status' => 'ok'], 200);
+})->name('up');

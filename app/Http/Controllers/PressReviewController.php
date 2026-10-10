@@ -694,7 +694,7 @@ foreach ($request->file('documents') as $doc) {
         try {
             $file = $request->file('image');
             $filename = Str::random(20) . '.' . $this->safeExt($file, UploadConstraints::IMAGE_MIMES);
-            $path = $file->storeAs('press-reviews/editor', $filename, 'public');
+            $file->move(public_path('press-reviews/editor'), $filename);
         } catch (\Exception $e) {
             Log::error('Erreur lors de l\'upload d\'image éditeur', ['error' => $e->getMessage()]);
 
@@ -706,7 +706,7 @@ foreach ($request->file('documents') as $doc) {
 
         return response()->json([
             'success' => true,
-            'url' => asset('storage/' . $path)
+            'url' => asset('press-reviews/editor/' . $filename)
         ], 200);
     }
 

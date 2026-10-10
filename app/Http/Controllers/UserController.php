@@ -14,24 +14,30 @@ use App\Models\Article;
 use App\Models\Book;
 use App\Models\Memoir;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Validator;
 
 
 
 class UserController extends Controller
 {
+    public const BOOT_PAGE_SIZE = 24;
+
     /**
-     * Display a listing of the resource.
+     * Affiche les 3 derniers contenus publiés (page d'accueil).
      */
     public function index()
     {
+        $domainNames = Domaine::pluck('name', 'id');
+        $categoryNames = Categorie::pluck('name', 'id');
+
         $lastarticles = Article::orderBy('created_at', 'desc')->where('status', 1)->take(3)->get();
-        $lastmemoirs = Memoir::orderBy('created_at', 'desc')->where('status', 1)->take(3)->get()->map(function ($mem) {
-            $mem->domain = Domaine::where('id', $mem->domain)->first()->name;
+        $lastmemoirs = Memoir::orderBy('created_at', 'desc')->where('status', 1)->take(3)->get()->map(function ($mem) use ($domainNames) {
+            $mem->domain = $domainNames[$mem->domain] ?? $mem->domain;
             return $mem;
         });
-        $lastbooks = Book::orderby('created_at', 'desc')->where('status', 1)->take(3)->get()->map(function ($book) {
-            $book->category = Categorie::where('id', $book->category)->first()->name;
+        $lastbooks = Book::orderby('created_at', 'desc')->where('status', 1)->take(3)->get()->map(function ($book) use ($categoryNames) {
+            $book->category = $categoryNames[$book->category] ?? $book->category;
             return $book;
         });
         return response()->json([
@@ -50,7 +56,7 @@ class UserController extends Controller
     }
     public function downloadbook($id)
     {
-        $book = book::find($id);
+        $book = book::where('id', $id)->where('status', 1)->first();
         if (!$book || !$book->extraitdocument) {
             return response()->json([
                 'error' => 'Fichier PDF non trouvé'
@@ -76,7 +82,7 @@ class UserController extends Controller
 
     public function downloadmemoir($id)
     {
-        $memoir = Memoir::where('id',$id)->first();
+        $memoir = Memoir::where('id', $id)->where('status', 1)->first();
         if (!$memoir || !$memoir->document) {
             return response()->json([
                 'error' => 'Fichier PDF non trouvé'
@@ -97,113 +103,116 @@ class UserController extends Controller
             'Content-Disposition' => 'attachment; filename="' . $memoir->title . '.' . $memoir->extension . '"'
         ]);
     }
+    /**
+     * Colonnes publiques légères (exclut document/extraitdocument binaires).
+     */
+    private const BOOT_COLUMNS = [
+        'books' => [
+            'id', 'title', 'author', 'category', 'cover', 'description', 'published_date',
+            'price', 'slug', 'isbn', 'amazon_url', 'pages', 'stock_quantity', 'language',
+            'publisher', 'edition', 'rating',
+        ],
+        'articles' => [
+            'id', 'title', 'excerpt', 'content', 'category', 'image', 'published_date',
+            'author', 'slug', 'meta_title', 'meta_description', 'tags', 'views_count',
+        ],
+        'memoirs' => [
+            'id', 'title', 'author', 'university', 'domain', 'year', 'slug', 'abstract',
+            'download_url', 'file_size', 'file_format', 'keywords', 'supervisor',
+            'defense_date', 'grade', 'views_count', 'downloads_count',
+        ],
+        'videos' => [
+            'id', 'title', 'slug', 'description', 'thumbnail', 'video_url',
+        ],
+    ];
+
+    /**
+     * Liste publique paginée : seuls les contenus publiés (status=1).
+     */
+    private function publicPage(string $type)
+    {
+        $columns = self::BOOT_COLUMNS[$type] ?? ['*'];
+
+        $query = match ($type) {
+            'books' => Book::where('status', 1),
+            'articles' => Article::where('status', 1),
+            'memoirs' => Memoir::where('status', 1),
+            'videos' => Video::where('status', 1),
+            default => abort(404),
+        };
+
+        $paginator = $query->orderBy('id', 'desc')->select($columns)->cursorPaginate(self::BOOT_PAGE_SIZE);
+
+        return [
+            'items' => $paginator->items(),
+            'next' => optional($paginator->nextCursor())->encode(),
+            'hasmore' => $paginator->hasMorePages(),
+        ];
+    }
+
     public function getdata($type = null)
     {
-        if ($type == 'null') {
-            $categories = Categorie::all();
-            $domaine = Domaine::all();
-            $services = service::all();
-            $paginator = video::orderBy('id', 'desc')->cursorPaginate(10000);
-            $videonextUrl = optional($paginator->nextCursor())->encode();
-            $hasmorevideo = $paginator->hasMorePages();
-            $videos = $paginator->items();
+        if ($type === 'null') {
+            // Boot du front : base complète paginée, cache courte durée.
+            $payload = Cache::remember('api:boot', now()->addMinutes(5), function () {
+                $books = $this->publicPage('books');
+                $articles = $this->publicPage('articles');
+                $memoirs = $this->publicPage('memoirs');
+                $videos = $this->publicPage('videos');
 
-            $paginator = book::orderBy('id', 'desc')->cursorPaginate(10000);
-            $booknextUrl = optional($paginator->nextCursor())->encode();
-            $hasmorebook = $paginator->hasMorePages();
+                return [
+                    'domaine' => Domaine::all(),
+                    'categories' => Categorie::all(),
+                    'memoirs' => $memoirs['items'],
+                    'memoirnexturl' => $memoirs['next'],
+                    'hasmorememoir' => $memoirs['hasmore'],
+                    'articles' => $articles['items'],
+                    'articlenexturl' => $articles['next'],
+                    'hasmorearticle' => $articles['hasmore'],
+                    'books' => $books['items'],
+                    'booknexturl' => $books['next'],
+                    'hasmorebook' => $books['hasmore'],
+                    'video' => $videos['items'],
+                    'videonextUrl' => $videos['next'],
+                    'hasmorevideo' => $videos['hasmore'],
+                ];
+            });
 
-            $books = $paginator->items(); // Les éléments de la page actuelle
-
-            $paginator = Article::orderBy('id', 'desc')->cursorPaginate(10000);
-            $articlenexturl = optional($paginator->nextCursor())->encode();
-            $hasmorearticle = $paginator->hasMorePages();
-            $articles = $paginator->items(); // Les éléments de la page actuelle
-
-
-            $paginator = Memoir::orderBy('id', 'desc')->cursorPaginate(10000);
-            $memoirnexturl = optional($paginator->nextCursor())->encode();
-            $hasmorememoir = $paginator->hasMorePages();
-            $memoirs = $paginator->items(); // Les éléments de la page actuelle
-
-            return response()->json([
-                // 'services'=>$services,
-                'domaine' => $domaine,
-                'categories' => $categories,
-                'memoirs' => $memoirs,
-                'memoirnexturl' => $memoirnexturl,
-                'hasmorememoir' => $hasmorememoir,
-                'articles' => $articles,
-                'articlenexturl' => $articlenexturl,
-                'hasmorearticle' => $hasmorearticle,
-                'books' => $books,
-                'booknexturl' => $booknextUrl,
-
-                'hasmorebook' => $hasmorebook,
-                'video' => $videos,
-                'videonextUrl' => $videonextUrl,
-                'hasmorevideo' => $hasmorevideo
-
-            ], 200);
+            return response()->json($payload, 200);
         }
 
         if (!empty($type)) {
-            if ($type == 'video') {
+            $page = match ($type) {
+                'video' => $this->publicPage('videos'),
+                'book' => $this->publicPage('books'),
+                'article' => $this->publicPage('articles'),
+                'memoir' => $this->publicPage('memoirs'),
+                default => null,
+            };
 
-                $paginator = video::orderBy('id', 'desc')->cursorPaginate(10000);
-                $videonextUrl = optional($paginator->nextCursor())->encode();
-                $hasmorevideo = $paginator->hasMorePages();
-                $videos = $paginator->items();
-
-                return response()->json([
-                    'video' => $videos,
-                    'videonextUrl' => $videonextUrl,
-                    'hasmorevideo' => $hasmorevideo
-
-                ], 200);
-            }
-            if ($type == 'book') {
-                $paginator = book::orderBy('id', 'desc')->cursorPaginate(10000);
-                $booknextUrl = optional($paginator->nextCursor())->encode();
-                $hasmorebook = $paginator->hasMorePages();
-                $books = $paginator->items(); // Les éléments de la page actuelle
-
-                return response()->json(
-                    [
-                        'books' => $books,
-                        'booknexturl' => $booknextUrl,
-
-                        'hasmorebook' => $hasmorebook,
+            if ($page !== null) {
+                return response()->json(match ($type) {
+                    'video' => [
+                        'video' => $page['items'],
+                        'videonextUrl' => $page['next'],
+                        'hasmorevideo' => $page['hasmore'],
                     ],
-                    200
-                );
-            }
-
-            if ($type == 'article') {
-                $paginator = Article::orderBy('id', 'desc')->cursorPaginate(10000);
-                $articlenexturl = optional($paginator->nextCursor())->encode();
-                $hasmorearticle = $paginator->hasMorePages();
-                $articles = $paginator->items(); // Les éléments de la page actuelle
-
-                return response()->json([
-                    'articles' => $articles,
-                    'articlenexturl' => $articlenexturl,
-                    'hasmorearticle' => $hasmorearticle,
-
-                ], 200);
-            }
-            if ($type == 'memoir') {
-                $paginator = Memoir::orderBy('id', 'desc')->cursorPaginate(10000);
-                $memoirnexturl = optional($paginator->nextCursor())->encode();
-                $hasmorememoir = $paginator->hasMorePages();
-                $memoirs = $paginator->items(); // Les éléments de la page actuelle
-
-                return response()->json([
-                    'memoirs' => $memoirs,
-                    'memoirnexturl' => $memoirnexturl,
-                    'hasmorememoir' => $hasmorememoir,
-
-
-                ], 200);
+                    'book' => [
+                        'books' => $page['items'],
+                        'booknexturl' => $page['next'],
+                        'hasmorebook' => $page['hasmore'],
+                    ],
+                    'article' => [
+                        'articles' => $page['items'],
+                        'articlenexturl' => $page['next'],
+                        'hasmorearticle' => $page['hasmore'],
+                    ],
+                    'memoir' => [
+                        'memoirs' => $page['items'],
+                        'memoirnexturl' => $page['next'],
+                        'hasmorememoir' => $page['hasmore'],
+                    ],
+                }, 200);
             }
         }
     }

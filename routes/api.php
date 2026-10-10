@@ -28,8 +28,8 @@ Route::post('data/partner', [TeamPartnerController::class, 'getPartners']);
 
 // Broadcast::routes(['middleware' => ['auth:api']]);
 Route::controller(UserController::class)->group(function () {
-    route::post('/login','login');
-    route::post('/register','store');
+    route::post('/login', 'login')->middleware('throttle:6,1');
+    route::post('/register', 'store')->middleware('throttle:6,1');
     Route::get('/data/{type}', 'getdata');
     Route::get('/downloadmemoir/{id}', 'downloadmemoir');
   
