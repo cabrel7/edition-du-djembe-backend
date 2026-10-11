@@ -25,6 +25,45 @@ trait HandlesSafeUploads
         return ['filename' => $filename, 'extension' => $extension];
     }
 
+    /**
+     * Upload HORS web root (storage/app/private) : jamais accessible par URL directe.
+     * Utiliser pour les documents payants/confidentiels (PDF livres, mémoires…).
+     */
+    private function storePrivateUpload(UploadedFile $file, string $directory, string $allowedMimes): array
+    {
+        $extension = $this->safeExt($file, $allowedMimes);
+        $filename = Str::random(20) . '.' . $extension;
+        $file->move(self::privateDir($directory), $filename);
+
+        return ['filename' => $filename, 'extension' => $extension];
+    }
+
+    private static function privateDir(string $directory): string
+    {
+        $dir = storage_path('app/private/' . $directory);
+        if (!is_dir($dir)) {
+            mkdir($dir, 0750, true);
+        }
+
+        return $dir;
+    }
+
+    /**
+     * Résout un fichier privé : chemin storage/app/private d'abord,
+     * fallback legacy web root pour les fichiers pré-migration (404 sinon).
+     */
+    private function privateOrLegacyPath(string $relative, string $legacyPublicDir): ?string
+    {
+        $private = storage_path('app/private/' . $relative);
+        if (is_file($private)) {
+            return $private;
+        }
+
+        $legacy = public_path($legacyPublicDir . '/' . basename($relative));
+
+        return is_file($legacy) ? $legacy : null;
+    }
+
     private function uniqueSlug(string $table, string $title): string
     {
         $base = Str::slug($title) ?: Str::lower(Str::random(8));

@@ -10,6 +10,7 @@ use App\Models\Service;
 use App\Models\Categorie;
 use Illuminate\Http\Request;
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\Concerns\HandlesSafeUploads;
 use App\Models\Article;
 use App\Models\Book;
 use App\Models\Memoir;
@@ -21,6 +22,8 @@ use Illuminate\Support\Facades\Validator;
 
 class UserController extends Controller
 {
+    use HandlesSafeUploads;
+
     public const BOOT_PAGE_SIZE = 24;
 
     /**
@@ -82,10 +85,13 @@ class UserController extends Controller
                 'error' => 'Fichier PDF non trouvé'
             ], 404);
         }
-        $filePath =  public_path("books/extrait_documents/" . $book->extraitdocument);
+        // Fichier privé (hors web root) avec fallback legacy pré-migration.
+        $filePath = $this->privateOrLegacyPath(
+            'books/extrait_documents/' . $book->extraitdocument,
+            'books/extrait_documents'
+        );
 
-
-        if (!file_exists($filePath)) {
+        if (!$filePath) {
             return response()->json([
                 'error' => 'Fichier PDF non trouvé'
             ], 404);
@@ -108,10 +114,13 @@ class UserController extends Controller
                 'error' => 'Fichier PDF non trouvé'
             ], 404);
         }
-        $filePath =  public_path("memoirs/documents/" . $memoir->document);
+        // Fichier privé (hors web root) avec fallback legacy pré-migration.
+        $filePath = $this->privateOrLegacyPath(
+            'memoirs/documents/' . $memoir->document,
+            'memoirs/documents'
+        );
 
-        // Vérifier si le fichier existe
-        if (!file_exists($filePath)) {
+        if (!$filePath) {
             return response()->json([
                 'error' => 'Fichier PDF non trouvé'
             ], 404);
@@ -247,29 +256,8 @@ class UserController extends Controller
     /**
      * Store a newly created resource in storage.
      */
-    public function store(Request $request)
-    {
-        $validator = Validator::make($request->all(), [
-            'name' => 'required|string|max:255',
-            'prenom' => 'nullable|string|max:50',
-            'email' => 'required|email|max:255|unique:users,email',
-            'password' => 'required|string|min:8',
-        ]);
-        if ($validator->fails()) {
-            return response()->json(['success' => false, 'message' => 'Erreur de validation', 'errors' => $validator->errors()], 422);
-        }
-        $user = new User();
-        $user->name = $request->name;
-        $user->prenom = $request->input('prenom') ?? '';
-        $user->email = $request->email;
-        $user->password = bcrypt($request->password);
-        $user->save();
-        $token = $user->createToken("LaravelPassportToken")->accessToken;
-
-        // Token en cookie httpOnly uniquement (jamais en réponse JSON).
-        return response()->json(['user' => $user], 200)
-            ->withCookie($this->authTokenCookie($request, $token));
-    }
+    // L'inscription publique (register) a été retirée : création de comptes
+    // réservée à l'administration (aucun self-signup toléré).
     public function login(Request $request)
     {
         $validator = Validator::make($request->all(), [

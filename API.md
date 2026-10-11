@@ -107,15 +107,11 @@ Réponse `200` (+ en-tête `Set-Cookie: edj_token=...; HttpOnly`), **sans token 
 
 `role: 1` = administrateur. HTTP `401` si identifiants invalides.
 
-### POST /api/register
+### POST /api/register — ❌ RETIRÉE
 
-Throttle : 6 requêtes/minute/IP.
-
-```json
-{ "name": "Jean", "prenom": "Dupont", "email": "jean@example.com", "password": "secret123" }
-```
-
-Même réponse que login (cookie + `user`).
+L'inscription publique n'existe plus (HTTP `404`) : la création de comptes est
+réservée à l'administration. Toute nouvelle route `/register` réintroduirait un
+vecteur de spam/comptes indésirables.
 
 ### POST /api/logout  🔒
 
@@ -154,7 +150,10 @@ Seuls les contenus **publiés** (`status = 1`) sont exposés.
 
 ### GET /api/downloadmemoir/{id}  ·  GET /api/downloadbook/{id}
 
-Téléchargement du PDF. `200` (PDF) · `404` si introuvable ou non publié.
+Téléchargement du PDF via contrôleur **uniquement** : les fichiers vivent hors
+web root (`storage/app/private/…`) et ne sont jamais accessibles par URL
+directe. `downloadbook` sert l'**extrait** gratuit ; `200` (PDF) · `404` si
+introuvable ou non publié.
 
 ### POST /api/updatearticleview · POST /api/updatememoirview
 

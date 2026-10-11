@@ -275,13 +275,13 @@ class AdminController extends Controller
             }
 
             if ($request->hasFile('document')) {
-                $upload = $this->storeUpload($request->file('document'), 'books/documents', \App\Support\UploadConstraints::DOCUMENT_MIMES);
+                $upload = $this->storePrivateUpload($request->file('document'), 'books/documents', \App\Support\UploadConstraints::DOCUMENT_MIMES);
                 $data['document'] = $upload['filename'];
                 $data['extension'] = $upload['extension'];
             }
 
             if ($request->hasFile('extraitdocument')) {
-                $data['extraitdocument'] = $this->storeUpload($request->file('extraitdocument'), 'books/extrait_documents', \App\Support\UploadConstraints::DOCUMENT_MIMES)['filename'];
+                $data['extraitdocument'] = $this->storePrivateUpload($request->file('extraitdocument'), 'books/extrait_documents', \App\Support\UploadConstraints::DOCUMENT_MIMES)['filename'];
             }
 
             if ($isUpdate) {
@@ -355,7 +355,7 @@ class AdminController extends Controller
             }
 
             if ($request->hasFile('document')) {
-                $upload = $this->storeUpload($request->file('document'), 'memoirs/documents', \App\Support\UploadConstraints::DOCUMENT_MIMES);
+                $upload = $this->storePrivateUpload($request->file('document'), 'memoirs/documents', \App\Support\UploadConstraints::DOCUMENT_MIMES);
                 $data['document'] = $upload['filename'];
                 $data['extension'] = $upload['extension'];
             }

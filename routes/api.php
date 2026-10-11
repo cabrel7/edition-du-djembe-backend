@@ -29,7 +29,7 @@ Route::post('data/partner', [TeamPartnerController::class, 'getPartners']);
 // Broadcast::routes(['middleware' => ['auth:api']]);
 Route::controller(UserController::class)->group(function () {
     route::post('/login', 'login')->middleware('throttle:6,1');
-    route::post('/register', 'store')->middleware('throttle:6,1');
+    // POST /register retiré : création de comptes réservée à l'admin (pas de self-signup).
     Route::get('/data/{type}', 'getdata');
     Route::get('/downloadmemoir/{id}', 'downloadmemoir');
   

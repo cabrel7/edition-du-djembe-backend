@@ -59,36 +59,16 @@ class AuthTest extends TestCase
         $this->postJson('/api/login', [])->assertStatus(422);
     }
 
-    public function test_register_creates_user_and_sets_httponly_cookie(): void
+    public function test_register_route_is_removed(): void
     {
-        $response = $this->postJson('/api/register', [
+        // L'inscription publique a été retirée (création de comptes réservée à l'admin).
+        $this->postJson('/api/register', [
             'name' => 'Nouvel',
             'email' => 'nouvel@example.com',
             'password' => 'secret123',
-        ]);
+        ])->assertStatus(404);
 
-        $response->assertStatus(200)->assertJsonStructure(['user']);
-        $cookie = $this->responseCookie($response, 'edj_token');
-        $this->assertNotNull($cookie);
-        $this->assertArrayNotHasKey('token', $response->json());
-        $this->assertDatabaseHas('users', ['email' => 'nouvel@example.com']);
-    }
-
-    public function test_register_rejects_duplicate_email_and_weak_password(): void
-    {
-        User::factory()->create(['email' => 'dup@example.com']);
-
-        $this->postJson('/api/register', [
-            'name' => 'X',
-            'email' => 'dup@example.com',
-            'password' => 'secret123',
-        ])->assertStatus(422);
-
-        $this->postJson('/api/register', [
-            'name' => 'X',
-            'email' => 'ok@example.com',
-            'password' => 'court',
-        ])->assertStatus(422);
+        $this->assertDatabaseMissing('users', ['email' => 'nouvel@example.com']);
     }
 
     public function test_logout_succeeds_for_authenticated_user(): void

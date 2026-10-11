@@ -29,6 +29,10 @@ storage/*.key
 
 .phpunit.result.cache
 
-# Uploads locaux (stockage dev, hors dépôt)
-public/books/documents/*.pdf
-public/books/extrait_documents/*.pdf
+# Uploads locaux (stockage dev, hors dépôt) — documents privés jamais trackés.
+# (Le stockage de prod = storage/app/private, hors web root — voir app:privatize-documents.)
+public/books/documents/
+public/books/extrait_documents/
+public/memoirs/documents/
+public/submissions/
+storage/app/private/
