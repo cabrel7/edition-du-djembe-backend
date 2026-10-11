@@ -265,7 +265,10 @@ class UserController extends Controller
         $user->password = bcrypt($request->password);
         $user->save();
         $token = $user->createToken("LaravelPassportToken")->accessToken;
-        return response()->json(['user' => $user, 'token' => $token], 200);
+
+        // Token en cookie httpOnly uniquement (jamais en réponse JSON).
+        return response()->json(['user' => $user], 200)
+            ->withCookie($this->authTokenCookie($request, $token));
     }
     public function login(Request $request)
     {
@@ -279,17 +282,58 @@ class UserController extends Controller
         if (Auth::attempt(['email' => $request->email, 'password' => $request->password])) {
             $user = Auth::user();
             $token = $user->createToken("LaravelPassportToken")->accessToken;
-            // $user->isconnected = 1;
             $user->save();
-            return response()->json(['user' => $user, 'token' => $token], 200);
+
+            // Le token n'est JAMAIS renvoyé en JSON (fallback tests/API) :
+            // il voyage uniquement en cookie httpOnly, illisible par le JS.
+            return response()->json(['user' => $user], 200)
+                ->withCookie($this->authTokenCookie($request, $token));
         } else {
             return response()->json("mot de passe ou adresse email incorrect", 401);
         }
     }
+
     public function logout(Request $request)
     {
         optional($request->user()?->token())->revoke();
-        return response()->json(['message' => 'deconnexion reussie'], 200);
+
+        return response()->json(['message' => 'deconnexion reussie'], 200)
+            ->withCookie($this->clearAuthTokenCookie($request));
+    }
+
+    /**
+     * Cookie httpOnly contenant le token Passport (24h, aligné tokensExpireIn).
+     * SameSite : Lax par défaut (front et API même site). Mettre None+Secure
+     * via API_COOKIE_SAMESITE si les domaines sont distincts.
+     */
+    private function authTokenCookie(Request $request, string $token)
+    {
+        return cookie(
+            \App\Http\Middleware\AccessTokenFromCookie::COOKIE_NAME,
+            $token,
+            60 * 24,
+            '/',
+            null,
+            $request->isSecure(),
+            true,
+            false,
+            env('API_COOKIE_SAMESITE', 'Lax')
+        );
+    }
+
+    private function clearAuthTokenCookie(Request $request)
+    {
+        return cookie(
+            \App\Http\Middleware\AccessTokenFromCookie::COOKIE_NAME,
+            '',
+            -60,
+            '/',
+            null,
+            $request->isSecure(),
+            true,
+            false,
+            env('API_COOKIE_SAMESITE', 'Lax')
+        );
     }
     /**
      * Display the specified resource.

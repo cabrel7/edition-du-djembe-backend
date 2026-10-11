@@ -19,7 +19,16 @@ return [
 
     'allowed_methods' => ['*'],
 
-    'allowed_origins' => ['https://leseditionsdudjembe.com','https://api.leseditionsdudjembe.com','https://admin.leseditionsdudjembe.com','https://www.leseditionsdudjembe.com'],
+    'allowed_origins' => array_values(array_filter(array_merge(
+        [
+            'https://leseditionsdudjembe.com',
+            'https://api.leseditionsdudjembe.com',
+            'https://admin.leseditionsdudjembe.com',
+            'https://www.leseditionsdudjembe.com',
+        ],
+        // Origines de développement uniquement (ex. CORS_DEV_ORIGINS="http://localhost:8080").
+        array_map('trim', explode(',', (string) env('CORS_DEV_ORIGINS', '')))
+    ))),
 
     'allowed_origins_patterns' => [],
 

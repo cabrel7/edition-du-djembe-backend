@@ -11,7 +11,16 @@ class AuthTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_login_success_returns_token(): void
+    private function responseCookie($response, string $name): ?string
+    {
+        $cookie = $response->getCookie($name, false);
+
+        return $cookie instanceof \Symfony\Component\HttpFoundation\Cookie
+            ? $cookie->getValue()
+            : null;
+    }
+
+    public function test_login_success_sets_httponly_cookie_and_hides_token(): void
     {
         $user = User::factory()->create(['email' => 'mika@example.com']);
 
@@ -20,7 +29,19 @@ class AuthTest extends TestCase
             'password' => 'password',
         ]);
 
-        $response->assertStatus(200)->assertJsonStructure(['user', 'token']);
+        $response->assertStatus(200)->assertJsonStructure(['user']);
+
+        $cookie = $this->responseCookie($response, 'edj_token');
+        $this->assertNotNull($cookie, 'Le cookie d\'authentification doit être posé');
+        $this->assertNotEmpty($cookie);
+
+        $setCookie = (string) $response->baseResponse->headers->get('Set-Cookie');
+        $this->assertStringContainsString('edj_token=' . $cookie, $setCookie);
+        $this->assertStringContainsString('httponly', strtolower($setCookie), 'Le cookie doit être httpOnly (inaccessible au JS)');
+        $this->assertStringNotContainsString('token', $response->getContent() === '' ? '' : json_encode($response->json()));
+
+        // Le token ne doit JAMAIS apparaître dans le corps JSON (faille localStorage).
+        $this->assertArrayNotHasKey('token', $response->json());
     }
 
     public function test_login_wrong_password_is_401(): void
@@ -38,7 +59,7 @@ class AuthTest extends TestCase
         $this->postJson('/api/login', [])->assertStatus(422);
     }
 
-    public function test_register_creates_user_and_returns_token(): void
+    public function test_register_creates_user_and_sets_httponly_cookie(): void
     {
         $response = $this->postJson('/api/register', [
             'name' => 'Nouvel',
@@ -46,7 +67,10 @@ class AuthTest extends TestCase
             'password' => 'secret123',
         ]);
 
-        $response->assertStatus(200)->assertJsonStructure(['user', 'token']);
+        $response->assertStatus(200)->assertJsonStructure(['user']);
+        $cookie = $this->responseCookie($response, 'edj_token');
+        $this->assertNotNull($cookie);
+        $this->assertArrayNotHasKey('token', $response->json());
         $this->assertDatabaseHas('users', ['email' => 'nouvel@example.com']);
     }
 
@@ -73,6 +97,24 @@ class AuthTest extends TestCase
         $plainToken = $user->createToken('test')->accessToken;
 
         $this->withHeaders(['Authorization' => 'Bearer ' . $plainToken])
+            ->postJson('/api/logout')
+            ->assertStatus(200);
+    }
+
+    public function test_login_cookie_authenticates_api_requests_without_header(): void
+    {
+        $user = User::factory()->create(['email' => 'cookie@example.com']);
+
+        $login = $this->postJson('/api/login', [
+            'email' => 'cookie@example.com',
+            'password' => 'password',
+        ]);
+        $login->assertStatus(200);
+        $cookie = $this->responseCookie($login, 'edj_token');
+        $this->assertNotNull($cookie, 'Le cookie httpOnly doit être posé au login');
+
+        // Requête API uniquement avec le cookie (aucun header) : authentifiée.
+        $this->withCredentials()->withUnencryptedCookies(['edj_token' => $cookie])
             ->postJson('/api/logout')
             ->assertStatus(200);
     }
