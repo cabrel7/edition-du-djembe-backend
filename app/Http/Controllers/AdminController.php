@@ -169,6 +169,7 @@ class AdminController extends Controller
             'title' => ($isUpdate ? 'nullable' : 'required') . '|string|max:255',
             'excerpt' => ($isUpdate ? 'nullable' : 'required') . '|string|max:1000',
             'content' => ($isUpdate ? 'nullable' : 'required') . '|string',
+            'category' => 'nullable|integer|exists:categories,id',
             'image' => 'nullable|file|image|mimes:' . \App\Support\UploadConstraints::IMAGE_MIMES . '|max:' . \App\Support\UploadConstraints::MAX_IMAGE_KB,
             'published_date' => 'nullable|date',
             'author' => 'nullable|string|max:255',
@@ -187,7 +188,7 @@ class AdminController extends Controller
 
         try {
             $data = $this->onlyPresent($request, [
-                'title','excerpt','content','published_date','author',
+                'title','excerpt','content','category','published_date','author',
                 'meta_title','meta_description','tags','views_count',
                 'reading_time','status','featured'
             ]);

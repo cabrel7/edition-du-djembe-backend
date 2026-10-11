@@ -149,8 +149,7 @@ class UserController extends Controller
         ],
         'memoirs' => [
             'id', 'title', 'author', 'university', 'domain', 'year', 'slug', 'abstract',
-            'download_url', 'file_size', 'file_format', 'keywords', 'supervisor',
-            'defense_date', 'grade', 'views_count', 'downloads_count',
+            'keywords', 'supervisor', 'defense_date', 'grade', 'views_count', 'downloads_count',
         ],
         'videos' => [
             'id', 'title', 'slug', 'description', 'thumbnail', 'video_url',
