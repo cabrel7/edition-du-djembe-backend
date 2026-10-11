@@ -62,6 +62,27 @@ class PublicContentTest extends TestCase
         $response->assertHeader('X-Frame-Options', 'SAMEORIGIN');
     }
 
+    public function test_public_cursor_pagination(): void
+    {
+        Book::factory()->count(25)->create(['status' => 1]);
+
+        $page1 = $this->getJson('/api/data/book');
+        $page1->assertStatus(200);
+        $this->assertCount(24, $page1->json('books'));
+        $this->assertTrue($page1->json('hasmorebook'));
+        $cursor = $page1->json('booknexturl');
+        $this->assertNotEmpty($cursor);
+
+        $page2 = $this->getJson('/api/data/book?cursor=' . urlencode($cursor));
+        $page2->assertStatus(200);
+        $this->assertCount(1, $page2->json('books'));
+        $this->assertFalse($page2->json('hasmorebook'));
+
+        $page1Ids = collect($page1->json('books'))->pluck('id');
+        $page2Ids = collect($page2->json('books'))->pluck('id');
+        $this->assertEmpty($page1Ids->intersect($page2Ids), 'Les pages ne doivent pas se chevaucher');
+    }
+
     public function test_login_is_rate_limited(): void
     {
         foreach (range(1, 6) as $i) {

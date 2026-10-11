@@ -85,18 +85,22 @@ class AdminController extends Controller
         $categories = Categorie::all();
         $domaine = Domaine::all();
 
-        $service_requests = Service_request::all()->map(function ($res) {
-            $res->service = Service::find($res->service_id)?->title;
-            $res->user = User::find($res->user_id)?->name;
+        $userNames = User::pluck('name', 'id');
+        $serviceTitles = Service::pluck('title', 'id');
+        $bookTitles = Book::pluck('title', 'id');
+        $bookAuthors = Book::pluck('author', 'id');
+
+        $service_requests = Service_request::all()->map(function ($res) use ($serviceTitles, $userNames) {
+            $res->service = $serviceTitles[$res->service_id] ?? null;
+            $res->user = $userNames[$res->user_id] ?? null;
             return $res;
         });
 
-        $order = Order::all()->map(function ($ord) {
-            $ord->user = User::find($ord->user_id)?->name;
-            $book = Book::find($ord->book_id);
-            if ($book) {
-                $ord->book = $book->title;
-                $ord->bookauthor = $book->author;
+        $order = Order::all()->map(function ($ord) use ($userNames, $bookTitles, $bookAuthors) {
+            $ord->user = $userNames[$ord->user_id] ?? null;
+            if (isset($bookTitles[$ord->book_id])) {
+                $ord->book = $bookTitles[$ord->book_id];
+                $ord->bookauthor = $bookAuthors[$ord->book_id] ?? null;
             }
             return $ord;
         });

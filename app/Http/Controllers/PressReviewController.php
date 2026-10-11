@@ -200,17 +200,19 @@ class PressReviewController extends Controller
         $perPage = $request->get('per_page', 20);
         $pressReviews = $query->paginate($perPage);
 
-        // Statistiques
+        // Statistiques (3 requêtes au lieu de 9 COUNT séparés)
+        $byStatus = PressReview::query()->selectRaw('status, count(*) as c')->groupBy('status')->pluck('c', 'status');
+        $byCategory = PressReview::query()->selectRaw('category, count(*) as c')->groupBy('category')->pluck('c', 'category');
         $stats = [
-            'total' => PressReview::count(),
-            'draft' => PressReview::where('status', 'draft')->count(),
-            'published' => PressReview::where('status', 'published')->count(),
-            'archived' => PressReview::where('status', 'archived')->count(),
-            'featured' => PressReview::where('is_featured', true)->count(),
-            'interviews' => PressReview::where('category', 'interview')->count(),
-            'critiques' => PressReview::where('category', 'critique')->count(),
-            'reportages' => PressReview::where('category', 'reportage')->count(),
-            'articles' => PressReview::where('category', 'article')->count()
+            'total' => (int) PressReview::count(),
+            'draft' => (int) ($byStatus['draft'] ?? 0),
+            'published' => (int) ($byStatus['published'] ?? 0),
+            'archived' => (int) ($byStatus['archived'] ?? 0),
+            'featured' => (int) PressReview::where('is_featured', true)->count(),
+            'interviews' => (int) ($byCategory['interview'] ?? 0),
+            'critiques' => (int) ($byCategory['critique'] ?? 0),
+            'reportages' => (int) ($byCategory['reportage'] ?? 0),
+            'articles' => (int) ($byCategory['article'] ?? 0)
         ];
 
         return response()->json([
