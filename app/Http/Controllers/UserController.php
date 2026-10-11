@@ -85,9 +85,11 @@ class UserController extends Controller
                 'error' => 'Fichier PDF non trouvé'
             ], 404);
         }
-        // Fichier privé (hors web root) avec fallback legacy pré-migration.
+        // Fichier privé (hors web root). basename() : les valeurs legacy
+        // contiennent un chemin relatif ("books/documents/x.pdf"), le code
+        // récent n'y stocke que le nom du fichier.
         $filePath = $this->privateOrLegacyPath(
-            'books/extrait_documents/' . $book->extraitdocument,
+            'books/extrait_documents/' . basename($book->extraitdocument),
             'books/extrait_documents'
         );
 
@@ -114,9 +116,9 @@ class UserController extends Controller
                 'error' => 'Fichier PDF non trouvé'
             ], 404);
         }
-        // Fichier privé (hors web root) avec fallback legacy pré-migration.
+        // Fichier privé (hors web root). basename() : valeurs legacy avec chemin.
         $filePath = $this->privateOrLegacyPath(
-            'memoirs/documents/' . $memoir->document,
+            'memoirs/documents/' . basename($memoir->document),
             'memoirs/documents'
         );
 

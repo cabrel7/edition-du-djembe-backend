@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
 
 /**
@@ -52,6 +53,32 @@ class PrivatizeDocuments extends Command
 
         $this->info("Terminé : {$total} fichier(s) déplacé(s) hors web root.");
 
+        $normalized = $this->normalizeColumn('books', 'document')
+            + $this->normalizeColumn('books', 'extraitdocument')
+            + $this->normalizeColumn('memoirs', 'document');
+        $this->info("Colonnes normalisées (nom de fichier seul) : {$normalized} ligne(s).");
+
         return self::SUCCESS;
+    }
+
+    /**
+     * Les valeurs legacy stockent un chemin relatif ("books/documents/x.pdf") ;
+     * le code récent n'y stocke que le nom. On ramène tout au nom seul pour
+     * que la reconstruction de chemin par les contrôleurs reste juste.
+     */
+    private function normalizeColumn(string $table, string $column): int
+    {
+        $count = 0;
+        $rows = DB::table($table)->whereNotNull($column)->where($column, 'like', '%/%')->get(['id', $column]);
+
+        foreach ($rows as $row) {
+            $basename = basename($row->$column);
+            if ($basename !== '' && $basename !== $row->$column) {
+                DB::table($table)->where('id', $row->id)->update([$column => $basename]);
+                $count++;
+            }
+        }
+
+        return $count;
     }
 }
