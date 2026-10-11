@@ -180,6 +180,105 @@ class UserController extends Controller
         ];
     }
 
+    /**
+     * Détail public d'un livre — résolu par slug OU id numérique.
+     */
+    public function showBook(string $idOrSlug)
+    {
+        $query = Book::where('status', 1);
+        $book = ctype_digit($idOrSlug)
+            ? $query->where('id', (int) $idOrSlug)->first()
+            : $query->where('slug', $idOrSlug)->first();
+
+        if (!$book) {
+            return response()->json(['message' => 'Livre introuvable'], 404);
+        }
+
+        return response()->json([
+            'id' => $book->id,
+            'title' => $book->title,
+            'slug' => $book->slug,
+            'author' => $book->author,
+            'description' => $book->description,
+            'cover' => $book->cover,
+            'published_date' => $book->published_date,
+            'price' => $book->price,
+            'isbn' => $book->isbn,
+            'amazon_url' => $book->amazon_url,
+            'pages' => $book->pages,
+            'language' => $book->language,
+            'publisher' => $book->publisher,
+            'edition' => $book->edition,
+            'rating' => $book->rating,
+            'category' => $book->category
+                ? optional(\App\Models\Categorie::find($book->category))->name
+                : null,
+            'has_excerpt' => !empty($book->extraitdocument),
+        ]);
+    }
+
+    /**
+     * Détail public d'un article — slug OU id.
+     */
+    public function showArticle(string $idOrSlug)
+    {
+        $query = Article::where('status', 1);
+        $article = ctype_digit($idOrSlug)
+            ? $query->where('id', (int) $idOrSlug)->first()
+            : $query->where('slug', $idOrSlug)->first();
+
+        if (!$article) {
+            return response()->json(['message' => 'Article introuvable'], 404);
+        }
+
+        $article->increment('views_count');
+
+        return response()->json($article->only([
+            'id', 'title', 'slug', 'excerpt', 'content', 'category', 'image',
+            'published_date', 'author', 'meta_title', 'meta_description', 'tags', 'reading_time',
+        ]));
+    }
+
+    /**
+     * Détail public d'un mémoire — slug OU id.
+     */
+    public function showMemoir(string $idOrSlug)
+    {
+        $query = Memoir::where('status', 1);
+        $memoir = ctype_digit($idOrSlug)
+            ? $query->where('id', (int) $idOrSlug)->first()
+            : $query->where('slug', $idOrSlug)->first();
+
+        if (!$memoir) {
+            return response()->json(['message' => 'Mémoire introuvable'], 404);
+        }
+
+        return response()->json($memoir->only([
+            'id', 'title', 'slug', 'author', 'university', 'domain', 'year',
+            'abstract', 'keywords', 'supervisor', 'defense_date', 'grade',
+            'views_count', 'downloads_count',
+        ]) + ['has_document' => !empty($memoir->document)]);
+    }
+
+    /**
+     * Détail public d'une vidéo — slug OU id.
+     */
+    public function showVideo(string $idOrSlug)
+    {
+        $query = Video::where('status', 1);
+        $video = ctype_digit($idOrSlug)
+            ? $query->where('id', (int) $idOrSlug)->first()
+            : $query->where('slug', $idOrSlug)->first();
+
+        if (!$video) {
+            return response()->json(['message' => 'Vidéo introuvable'], 404);
+        }
+
+        return response()->json($video->only([
+            'id', 'title', 'slug', 'description', 'thumbnail', 'video_url',
+        ]));
+    }
+
     public function getdata($type = null)
     {
         if ($type === 'null') {

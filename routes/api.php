@@ -34,6 +34,11 @@ Route::controller(UserController::class)->group(function () {
     Route::get('/downloadmemoir/{id}', 'downloadmemoir');
   
     Route::get('/downloadbook/{id}', 'downloadbook');
+    // Détail public : slug ou id (SEO). Même résolution pour les deux formes.
+    Route::get('/books/{idOrSlug}', 'showBook')->where('idOrSlug', '[0-9A-Za-z\-]+');
+    Route::get('/articles/{idOrSlug}', 'showArticle')->where('idOrSlug', '[0-9A-Za-z\-]+');
+    Route::get('/memoirs/{idOrSlug}', 'showMemoir')->where('idOrSlug', '[0-9A-Za-z\-]+');
+    Route::get('/videos/{idOrSlug}', 'showVideo')->where('idOrSlug', '[0-9A-Za-z\-]+');
     Route::get('/getbasedata', 'index');
     route::post('/updatearticleview','updatearticleview');
     route::post('/updatememoirview','updatememoirview');
