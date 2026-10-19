@@ -7,7 +7,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
 
 /**
- * Déplace les documents sensibles du web root vers storage/app/private
+ * Déplace les documents sensibles du web root vers storage/app
  * (hors portée de tout serveur web). Idempotent : ne bouge que ce qui existe encore.
  *
  *   php artisan app:privatize-documents
@@ -20,17 +20,20 @@ class PrivatizeDocuments extends Command
 
     public function handle(): int
     {
+        // Destination = là où les contrôleurs lisent réellement : private/ pour
+        // les documents (privateOrLegacyPath), mais storage/app/submissions pour
+        // les soumissions (SubmissionController lit storage/app/<SUBMISSIONS_DIR>).
         $moves = [
-            'books/documents' => 'books/documents',
-            'books/extrait_documents' => 'books/extrait_documents',
-            'memoirs/documents' => 'memoirs/documents',
+            'books/documents' => 'private/books/documents',
+            'books/extrait_documents' => 'private/books/extrait_documents',
+            'memoirs/documents' => 'private/memoirs/documents',
             'submissions' => 'submissions',
         ];
 
         $total = 0;
-        foreach ($moves as $publicRel => $privateRel) {
+        foreach ($moves as $publicRel => $storageRel) {
             $from = public_path($publicRel);
-            $to = storage_path('app/private/' . $privateRel);
+            $to = storage_path('app/' . $storageRel);
 
             if (!is_dir($from)) {
                 continue;
@@ -48,7 +51,7 @@ class PrivatizeDocuments extends Command
                 rename($file->getPathname(), $target);
                 $total++;
             }
-            $this->info("{$publicRel} → storage/app/private/{$privateRel}");
+            $this->info("{$publicRel} → storage/app/{$storageRel}");
         }
 
         $this->info("Terminé : {$total} fichier(s) déplacé(s) hors web root.");
