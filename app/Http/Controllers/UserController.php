@@ -150,6 +150,7 @@ class UserController extends Controller
         'memoirs' => [
             'id', 'title', 'author', 'university', 'domain', 'year', 'slug', 'abstract',
             'keywords', 'supervisor', 'defense_date', 'grade', 'views_count', 'downloads_count',
+            'cover',
         ],
         'videos' => [
             'id', 'title', 'slug', 'description', 'thumbnail', 'video_url',
@@ -256,7 +257,7 @@ class UserController extends Controller
         return response()->json($memoir->only([
             'id', 'title', 'slug', 'author', 'university', 'domain', 'year',
             'abstract', 'keywords', 'supervisor', 'defense_date', 'grade',
-            'views_count', 'downloads_count',
+            'views_count', 'downloads_count', 'cover',
         ]) + ['has_document' => !empty($memoir->document)]);
     }
 
