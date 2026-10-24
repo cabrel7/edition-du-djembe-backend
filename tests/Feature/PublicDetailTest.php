@@ -48,4 +48,20 @@ class PublicDetailTest extends TestCase
         $this->getJson('/api/memoirs/memoire-test')->assertOk()->assertJsonPath('id', $m->id);
         $this->getJson('/api/videos/video-test')->assertOk()->assertJsonPath('id', $v->id);
     }
+
+    public function test_detail_resolves_accented_legacy_slugs(): void
+    {
+        // Slugs historiques (ancien générateur front) avec accents : la
+        // contrainte de route doit les accepter, pas renvoyer 404.
+        $a = \App\Models\Article::factory()->create([
+            'status' => 1,
+            'slug' => 'journée-d-étude-sur-le-handicap',
+        ]);
+        $b = Book::factory()->create(['status' => 1, 'slug' => 'l-édition-face-aux-ia']);
+
+        $this->getJson('/api/articles/' . rawurlencode($a->slug))
+            ->assertOk()->assertJsonPath('id', $a->id);
+        $this->getJson('/api/books/' . rawurlencode($b->slug))
+            ->assertOk()->assertJsonPath('id', $b->id);
+    }
 }
