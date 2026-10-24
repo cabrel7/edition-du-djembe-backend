@@ -412,9 +412,9 @@ foreach ($request->file('documents') as $doc) {
             'source' => 'nullable|string|max:255',
             'source_url' => 'nullable|url|max:500',
             'publication_date' => 'nullable|date',
-            'cover_image' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:5120',
-            'gallery_images.*' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:5120',
-            'documents.*' => 'nullable|file|mimes:pdf,doc,docx|max:10240',
+            'cover_image' => 'nullable|image|mimes:' . UploadConstraints::IMAGE_MIMES . '|max:' . UploadConstraints::MAX_IMAGE_KB,
+            'gallery_images.*' => 'nullable|image|mimes:' . UploadConstraints::IMAGE_MIMES . '|max:' . UploadConstraints::MAX_IMAGE_KB,
+            'documents.*' => 'nullable|file|mimes:' . UploadConstraints::DOCUMENT_MIMES . '|max:' . UploadConstraints::MAX_DOCUMENT_KB,
             'video_url' => 'nullable|url|max:500',
             'audio_url' => 'nullable|url|max:500',
             'category' => 'sometimes|required|in:interview,critique,reportage,article,autre',
@@ -686,7 +686,7 @@ foreach ($request->file('documents') as $doc) {
         }
 
         $validator = Validator::make($request->all(), [
-            'image' => 'required|image|mimes:jpeg,png,jpg,gif|max:5120'
+            'image' => 'required|image|mimes:' . UploadConstraints::IMAGE_MIMES . '|max:' . UploadConstraints::MAX_IMAGE_KB
         ]);
 
         if ($validator->fails()) {
