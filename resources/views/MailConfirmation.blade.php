@@ -69,7 +69,7 @@
       </p>
     </div>
     <div class="footer">
-      © 2026 les edition du djembe d'ebene — Tous droits réservés.
+      © 2026 les edition du djembe d'ebene. Tous droits réservés.
     </div>
   </div>
 </body>

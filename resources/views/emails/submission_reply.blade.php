@@ -80,7 +80,7 @@
       <p>L'équipe des Éditions du Djembé</p>
     </div>
     <div class="footer">
-      © {{ date('Y') }} Les Éditions du Djembé — Tous droits réservés.
+      © {{ date('Y') }} Les Éditions du Djembé. Tous droits réservés.
     </div>
   </div>
 </body>

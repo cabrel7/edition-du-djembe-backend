@@ -23,7 +23,7 @@ class SubmissionReceived extends Mailable
     public function envelope(): Envelope
     {
         return new Envelope(
-            subject: 'Nous avons bien reçu votre soumission — Les Éditions du Djembé',
+            subject: 'Nous avons bien reçu votre soumission | Les Éditions du Djembé',
         );
     }
 
