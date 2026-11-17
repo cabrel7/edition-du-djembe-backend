@@ -101,10 +101,16 @@ class UserController extends Controller
 
 
 
-        return response()->download($filePath, $book->title . '.' . $book->extension, [
-            'Content-Type' => 'application/pdf',
-            'Content-Disposition' => 'attachment; filename="' . $book->title . '.' . $book->extension . '"'
-        ]);
+        try {
+            return response()->download($filePath, $book->title . '.' . $book->extension, [
+                'Content-Type' => 'application/pdf',
+                'Content-Disposition' => 'attachment; filename="' . $book->title . '.' . $book->extension . '"'
+            ]);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('Erreur lors du téléchargement du livre', ['id' => $id, 'error' => $e->getMessage()]);
+
+            return response()->json(['success' => false, 'message' => 'Erreur lors du téléchargement du fichier'], 500);
+        }
     }
 
 
@@ -127,12 +133,21 @@ class UserController extends Controller
                 'error' => 'Fichier PDF non trouvé'
             ], 404);
         }
+        try {
+            $response = response()->download($filePath, $memoir->title . '.pdf', [
+                'Content-Type' => 'application/pdf',
+                'Content-Disposition' => 'attachment; filename="' . $memoir->title . '.' . $memoir->extension . '"'
+            ]);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('Erreur lors du téléchargement du mémoire', ['id' => $id, 'error' => $e->getMessage()]);
+
+            return response()->json(['success' => false, 'message' => 'Erreur lors du téléchargement du fichier'], 500);
+        }
+
+        // Compté seulement si le fichier est réellement servable.
         Memoir::where('id', $id)->increment('downloads_count');
 
-        return response()->download($filePath, $memoir->title . '.pdf', [
-            'Content-Type' => 'application/pdf',
-            'Content-Disposition' => 'attachment; filename="' . $memoir->title . '.' . $memoir->extension . '"'
-        ]);
+        return $response;
     }
     /**
      * Colonnes publiques légères (exclut document/extraitdocument binaires).

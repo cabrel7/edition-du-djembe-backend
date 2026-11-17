@@ -84,12 +84,15 @@ Route::middleware(['auth:api', 'admin'])->group(function () {
     Route::get('team_members', [TeamPartnerController::class, 'adminGetTeamMembers']);
     Route::post('team_members', [TeamPartnerController::class, 'saveTeamMember']);
     Route::put('team_members/{id}', [TeamPartnerController::class, 'saveTeamMember']);
+    // Alias POST : PHP ne parse pas le multipart/form-data d'un PUT (champs + fichier perdus).
+    Route::post('team_members/{id}', [TeamPartnerController::class, 'saveTeamMember']);
     Route::delete('team_members/{id}', [TeamPartnerController::class, 'deleteTeamMember']);
 
     // Partners
     Route::get('partners', [TeamPartnerController::class, 'adminGetPartners']);
     Route::post('partners', [TeamPartnerController::class, 'savePartner']);
     Route::put('partners/{id}', [TeamPartnerController::class, 'savePartner']);
+    Route::post('partners/{id}', [TeamPartnerController::class, 'savePartner']);
     Route::delete('partners/{id}', [TeamPartnerController::class, 'deletePartner']);
 
     // Contacts
@@ -102,6 +105,8 @@ Route::middleware(['auth:api', 'admin'])->group(function () {
     // Contenu éditorial
     Route::controller(AdminController::class)->group(function () {
         Route::get('/getmemoir', 'getmemoir');
+        // Téléchargement admin : tous statuts, sans incrément de downloads_count.
+        Route::get('/admin/memoirs/{id}/download', 'downloadMemoir');
         Route::get('/getarticle', 'getarticle');
         Route::get('/getbook', 'getbook');
         Route::get('/adminbase', 'index');

@@ -317,19 +317,9 @@ class PressReviewController extends Controller
 
             }
 
-            // Gestion de la galerie d'images
+            // Gestion de la galerie d'images (dédoublonnée par contenu)
             if ($request->hasFile('gallery_images')) {
-                $galleryPaths = [];
-                foreach ($request->file('gallery_images') as $image) {
-                      $file = $image;
-            $filename = Str::random(20) . '.' . $this->safeExt($file, UploadConstraints::IMAGE_MIMES);
-            $file->move(public_path('press-reviews/gallery/'), $filename);
-            $path = 'press-reviews/gallery/' . $filename;
-            $galleryPaths[] = $path;
-
-
-                }
-                $data['gallery_images'] = $galleryPaths;
+                $data['gallery_images'] = $this->mergeGalleryImages([], $request->file('gallery_images'));
             }
 
             // Gestion des documents
@@ -461,18 +451,18 @@ foreach ($request->file('documents') as $doc) {
 
             }
 
-            // Gestion de la galerie d'images (ajout, sans effacer les images existantes)
-            if ($request->hasFile('gallery_images')) {
-                $galleryPaths = is_array($pressReview->gallery_images) ? $pressReview->gallery_images : [];
-                foreach ($request->file('gallery_images') as $image) {
-
-                    $file = $image;
-            $filename = Str::random(20) . '.' . $this->safeExt($file, UploadConstraints::IMAGE_MIMES);
-            $file->move(public_path('press-reviews/gallery'), $filename);
-            $path = 'press-reviews/gallery/' . $filename;
-                    $galleryPaths[] = $path;
+            // Galerie : retrait des images non conservées (existing_gallery_images, si fourni)
+            // puis ajout idempotent des nouvelles (dédoublonnage par sha256 du contenu).
+            $uploads = $request->file('gallery_images');
+            $uploads = is_array($uploads) ? $uploads : [];
+            $hasKeepList = $request->has('existing_gallery_images');
+            $removedGallery = [];
+            if ($hasKeepList || $uploads !== []) {
+                $current = is_array($pressReview->gallery_images) ? $pressReview->gallery_images : [];
+                if ($hasKeepList) {
+                    $current = $this->pruneGallery($current, $request->input('existing_gallery_images'), $uploads, $removedGallery);
                 }
-                $data['gallery_images'] = $galleryPaths;
+                $data['gallery_images'] = $this->mergeGalleryImages($current, $uploads);
             }
 
             // Gestion des documents (ajout, sans effacer les documents existants)
@@ -509,6 +499,11 @@ foreach ($request->file('documents') as $doc) {
             }
 
             $pressReview->update($data);
+
+            // Suppression disque APRÈS la persistance : un échec en base ne laisse pas de références mortes.
+            foreach ($removedGallery as $removedPath) {
+                File::delete(public_path(self::GALLERY_DIR . '/' . basename($removedPath)));
+            }
 
             return response()->json([
                 'success' => true,
@@ -710,6 +705,90 @@ foreach ($request->file('documents') as $doc) {
             'success' => true,
             'url' => asset('press-reviews/editor/' . $filename)
         ], 200);
+    }
+
+    private const GALLERY_DIR = 'press-reviews/gallery';
+
+    private const HASH_ALGO = 'sha256';
+
+    private function galleryFileHash(string $relativePath): ?string
+    {
+        // basename : on ne résout jamais hors du dossier galerie, quelle que soit la valeur stockée/envoyée.
+        $full = public_path(self::GALLERY_DIR . '/' . basename($relativePath));
+
+        return is_file($full) ? (hash_file(self::HASH_ALGO, $full) ?: null) : null;
+    }
+
+    /**
+     * Retire de la galerie les images absentes de la liste à conserver
+     * (JSON ou tableau envoyé par le client) et supprime leurs fichiers.
+     * Seules des valeurs déjà présentes en base sont considérées (jamais de chemin client).
+     * Une image retirée dont le contenu est ré-envoyé dans la même requête est conservée
+     * (retry après réponse perdue : pas de suppression/recréation inutile).
+     *
+     * @param string[] $current
+     * @param \Illuminate\Http\UploadedFile[] $uploads
+     * @param string[] $removed rempli avec les chemins à supprimer (suppression différée par l'appelant)
+     * @return string[]
+     */
+    private function pruneGallery(array $current, mixed $keepInput, array $uploads, array &$removed): array
+    {
+        $keep = is_string($keepInput) ? json_decode($keepInput, true) : $keepInput;
+        // Repli sûr : liste illisible = aucune suppression (jamais de purge sur entrée malformée).
+        if (!is_array($keep)) {
+            return $current;
+        }
+        $keep = array_map(fn ($v) => basename((string) $v), array_filter($keep, 'is_scalar'));
+
+        $uploadHashes = [];
+        foreach ($uploads as $file) {
+            $uploadHashes[hash_file(self::HASH_ALGO, $file->getRealPath())] = true;
+        }
+
+        $kept = [];
+        foreach ($current as $path) {
+            $hash = $this->galleryFileHash($path);
+            if (in_array(basename($path), $keep, true) || ($hash !== null && isset($uploadHashes[$hash]))) {
+                $kept[] = $path;
+                continue;
+            }
+            $removed[] = $path;
+        }
+
+        return $kept;
+    }
+
+    /**
+     * Ajout IDEMPOTENT : un fichier dont le contenu (sha256) est déjà dans la galerie
+     * de cette revue — ou déjà vu dans la même requête — n'est ni ajouté ni copié sur disque.
+     *
+     * @param string[] $current
+     * @param \Illuminate\Http\UploadedFile[]|\Illuminate\Http\UploadedFile $uploads
+     * @return string[] galerie finale complète
+     */
+    private function mergeGalleryImages(array $current, array|\Illuminate\Http\UploadedFile $uploads): array
+    {
+        $uploads = is_array($uploads) ? $uploads : [$uploads];
+        $seen = [];
+        foreach ($current as $path) {
+            $hash = $this->galleryFileHash($path);
+            if ($hash !== null) {
+                $seen[$hash] = true;
+            }
+        }
+
+        foreach ($uploads as $file) {
+            $hash = hash_file(self::HASH_ALGO, $file->getRealPath());
+            if ($hash === false || isset($seen[$hash])) {
+                continue;
+            }
+            $seen[$hash] = true;
+            $filename = Str::random(20) . '.' . $this->safeExt($file, UploadConstraints::IMAGE_MIMES);
+            $file->move(public_path(self::GALLERY_DIR), $filename);
+            $current[] = self::GALLERY_DIR . '/' . $filename;
+        }
+
+        return array_values($current);
     }
 
     /**

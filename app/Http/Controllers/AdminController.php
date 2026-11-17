@@ -36,6 +36,37 @@ class AdminController extends Controller
         );
     }
 
+    /**
+     * Téléchargement admin du document d'un mémoire (tous statuts, brouillons inclus).
+     * N'incrémente pas downloads_count (réservé aux téléchargements publics).
+     */
+    public function downloadMemoir($id)
+    {
+        $memoir = Memoir::find($id);
+        if (!$memoir || !$memoir->document) {
+            return response()->json(['success' => false, 'message' => 'Fichier non trouvé'], 404);
+        }
+
+        $filePath = $this->privateOrLegacyPath(
+            'memoirs/documents/' . basename($memoir->document),
+            'memoirs/documents'
+        );
+        if (!$filePath) {
+            return response()->json(['success' => false, 'message' => 'Fichier non trouvé'], 404);
+        }
+
+        try {
+            return response()->download(
+                $filePath,
+                $this->safeDownloadName((string) $memoir->title, pathinfo($filePath, PATHINFO_EXTENSION))
+            );
+        } catch (\Throwable $e) {
+            Log::error('Erreur lors du téléchargement admin du mémoire', ['id' => $id, 'error' => $e->getMessage()]);
+
+            return response()->json(['success' => false, 'message' => 'Erreur lors du téléchargement du fichier'], 500);
+        }
+    }
+
     public function saveVideo(Request $request)
     {
         $isUpdate = (bool) $request->id;

@@ -86,7 +86,7 @@ class ContactController extends Controller
         $contact = Contact::find($id);
         
         if (!$contact) {
-            return response()->json(['message' => 'Contact not found'], 404);
+            return response()->json(['success' => false, 'message' => 'Contact not found'], 404);
         }
         
         return response()->json(['contact' => $contact], 200);
@@ -150,7 +150,7 @@ class ContactController extends Controller
         $contact = Contact::find($id);
         
         if (!$contact) {
-            return response()->json(['message' => 'Contact not found'], 404);
+            return response()->json(['success' => false, 'message' => 'Contact not found'], 404);
         }
         
         $contact->status = $request->status;
@@ -181,7 +181,7 @@ class ContactController extends Controller
         $contact = Contact::find($id);
         
         if (!$contact) {
-            return response()->json(['message' => 'Contact not found'], 404);
+            return response()->json(['success' => false, 'message' => 'Contact not found'], 404);
         }
         
         $contact->delete();

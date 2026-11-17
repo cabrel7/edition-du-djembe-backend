@@ -64,6 +64,16 @@ trait HandlesSafeUploads
         return is_file($legacy) ? $legacy : null;
     }
 
+    /** Nom de fichier de téléchargement sûr (pas de séparateur, guillemet ni caractère de contrôle). */
+    private function safeDownloadName(string $title, string $extension): string
+    {
+        $base = trim((string) preg_replace('/[^\p{L}\p{N} ._-]+/u', '_', $title), " ._-");
+        $base = mb_substr($base !== '' ? $base : 'document', 0, 150);
+        $ext = strtolower((string) preg_replace('/[^A-Za-z0-9]/', '', $extension));
+
+        return $ext !== '' ? $base . '.' . $ext : $base;
+    }
+
     private function uniqueSlug(string $table, string $title): string
     {
         $base = Str::slug($title) ?: Str::lower(Str::random(8));

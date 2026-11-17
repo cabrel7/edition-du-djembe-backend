@@ -28,7 +28,8 @@ class Memoir extends Model
         'downloads_count',
         'status',
         'cover',
-        'document'
+        'document',
+        'extension'
     ];
 
     protected $casts = [
