@@ -13,6 +13,42 @@ class TeamPartnerController extends Controller
 {
     use \App\Http\Controllers\Concerns\HandlesSafeUploads;
 
+    private const DEFAULT_IS_ACTIVE = true;
+
+    /**
+     * is_active n'est écrit que s'il est fourni ; à la création, défaut = celui de la
+     * migration (actif). Une mise à jour partielle ne réactive/désactive jamais en silence.
+     */
+    private function applyIsActive(array &$data, Request $request, bool $isUpdate): void
+    {
+        $value = $this->presentBool($request, 'is_active');
+
+        if ($value !== null) {
+            $data['is_active'] = $value;
+        } elseif (!$isUpdate) {
+            $data['is_active'] = self::DEFAULT_IS_ACTIVE;
+        }
+    }
+
+    /**
+     * Écriture en base ; en cas d'échec, supprime le fichier fraîchement uploadé (jamais l'ancien)
+     * puis relance l'exception (le Handler renvoie le 500 JSON habituel).
+     *
+     * @template T
+     * @param callable(): T $write
+     * @return T
+     */
+    private function persistOrDiscard(callable $write): mixed
+    {
+        try {
+            return $write();
+        } catch (\Throwable $e) {
+            $this->discardNewUploads();
+
+            throw $e;
+        }
+    }
+
     // ==================== TEAM MEMBERS ====================
     
     /**
@@ -59,6 +95,9 @@ class TeamPartnerController extends Controller
      */
     public function saveTeamMember(Request $request, $id = null)
     {
+        $this->normalizeBoolInput($request, 'is_active');
+        $this->beginUploads();
+
         $validator = Validator::make($request->all(), [
             'nom' => 'required|string|max:100',
             'prenom' => 'required|string|max:100',
@@ -67,7 +106,7 @@ class TeamPartnerController extends Controller
             'bio' => 'nullable|string',
             'photo' => 'nullable|image|mimes:' . UploadConstraints::PARTNER_IMAGE_MIMES . '|max:' . UploadConstraints::MAX_IMAGE_KB,
             'display_order' => 'nullable|integer',
-            // 'is_active' => 'nullable|boolean',
+            'is_active' => 'sometimes|boolean',
             'social_links' => 'nullable|array'
         ]);
         
@@ -78,31 +117,26 @@ class TeamPartnerController extends Controller
             ], 422);
         }
         
-        $data = $request->except('photo', 'social_links','is_active');
-        $data['is_active']=$request->is_active?1:0;
-        // Gérer les liens sociaux (stockés en JSON)
-        if ($request->has('social_links')) {
-            $data['social_links'] = json_encode($request->social_links);
+        $data = $request->except('photo', 'social_links', 'is_active');
+        $this->applyIsActive($data, $request, (bool) $id);
+        // Tableau PHP : le cast du modèle encode (pas de json_encode = pas de double encodage).
+        if ($request->exists('social_links')) {
+            $data['social_links'] = $request->input('social_links');
         }
         
         if ($id) {
             // Mise à jour
             $teamMember = Team_members::findOrFail($id);
-            
-            // Gérer l'upload de la photo
+            $oldPhoto = null;
+
+            // Gérer l'upload de la photo (l'ancienne est supprimée APRÈS la mise à jour en base)
             if ($request->hasFile('photo')) {
-                // Supprimer l'ancienne photo si elle existe
-                // if ($teamMember->photo && Storage::exists('team/' . $teamMember->photo)) {
-                //     Storage::delete('team/' . $teamMember->photo);
-                // }
-                
-                $file = $request->file('photo');
-                $filename = time() . '_' . uniqid() . '.' . $this->safeExt($file, UploadConstraints::PARTNER_IMAGE_MIMES);
-                 $file->move(public_path('/team'), $filename);
-                $data['photo'] = $filename;
+                $oldPhoto = $teamMember->photo;
+                $data['photo'] = $this->storeUpload($request->file('photo'), 'team', UploadConstraints::PARTNER_IMAGE_MIMES)['filename'];
             }
 
-            $teamMember->update($data);
+            $this->persistOrDiscard(fn () => $teamMember->update($data));
+            $this->deleteStoredFile($oldPhoto, 'team');
             
             return response()->json([
                 'success' => true,
@@ -113,13 +147,10 @@ class TeamPartnerController extends Controller
             // Création
             // Gérer l'upload de la photo
             if ($request->hasFile('photo')) {
-                $file = $request->file('photo');
-                $filename = time() . '_' . uniqid() . '.' . $this->safeExt($file, UploadConstraints::PARTNER_IMAGE_MIMES);
-                 $file->move(public_path('/team'), $filename);
-                $data['photo'] = $filename;
+                $data['photo'] = $this->storeUpload($request->file('photo'), 'team', UploadConstraints::PARTNER_IMAGE_MIMES)['filename'];
             }
 
-            $teamMember = Team_members::create($data);
+            $teamMember = $this->persistOrDiscard(fn () => Team_members::create($data));
             
             return response()->json([
                 'success' => true,
@@ -136,12 +167,8 @@ class TeamPartnerController extends Controller
     {
         $teamMember = Team_members::findOrFail($id);
         
-        // Supprimer la photo si elle existe
-        // if ($teamMember->photo && Storage::exists('team/' . $teamMember->photo)) {
-        //     Storage::delete('team/' . $teamMember->photo);
-        // }
-        
         $teamMember->delete();
+        $this->deleteStoredFile($teamMember->photo, 'team');
         
         return response()->json([
             'success' => true,
@@ -195,6 +222,9 @@ class TeamPartnerController extends Controller
      */
     public function savePartner(Request $request, $id = null)
     {
+        $this->normalizeBoolInput($request, 'is_active');
+        $this->beginUploads();
+
         $validator = Validator::make($request->all(), [
             'nom' => 'required|string|max:255',
             'website' => 'nullable|url|max:255',
@@ -202,7 +232,7 @@ class TeamPartnerController extends Controller
             'type' => 'nullable|string|max:100',
             'image' => 'nullable|image|mimes:' . UploadConstraints::PARTNER_IMAGE_MIMES . '|max:' . UploadConstraints::MAX_IMAGE_KB,
             'display_order' => 'nullable|integer',
-            // 'is_active' => 'nullable|boolean'
+            'is_active' => 'sometimes|boolean',
         ]);
         
         if ($validator->fails()) {
@@ -212,27 +242,22 @@ class TeamPartnerController extends Controller
             ], 422);
         }
         
-        $data = $request->except('image','is_active');
-        $data['is_active']=$request->is_active?1:0;
+        $data = $request->except('image', 'is_active');
+        $this->applyIsActive($data, $request, (bool) $id);
         
         if ($id) {
             // Mise à jour
             $partner = Partners::findOrFail($id);
-            
-            // Gérer l'upload du logo
+            $oldImage = null;
+
+            // Gérer l'upload du logo (l'ancien est supprimé APRÈS la mise à jour en base)
             if ($request->hasFile('image')) {
-                // Supprimer l'ancien logo si il existe
-                // if ($partner->image && Storage::exists('partners/' . $partner->image)) {
-                //     Storage::delete('partners/' . $partner->image);
-                // }
-                
-                $file = $request->file('image');
-                $filename = time() . '_' . uniqid() . '.' . $this->safeExt($file, UploadConstraints::PARTNER_IMAGE_MIMES);
-                  $file->move(public_path('/partners'), $filename);
-                $data['image'] = $filename;
+                $oldImage = $partner->image;
+                $data['image'] = $this->storeUpload($request->file('image'), 'partners', UploadConstraints::PARTNER_IMAGE_MIMES)['filename'];
             }
 
-            $partner->update($data);
+            $this->persistOrDiscard(fn () => $partner->update($data));
+            $this->deleteStoredFile($oldImage, 'partners');
             
             return response()->json([
                 'success' => true,
@@ -243,13 +268,10 @@ class TeamPartnerController extends Controller
             // Création
             // Gérer l'upload du logo
             if ($request->hasFile('image')) {
-                $file = $request->file('image');
-                $filename = time() . '_' . uniqid() . '.' . $this->safeExt($file, UploadConstraints::PARTNER_IMAGE_MIMES);
-                $file->move(public_path('/partners'), $filename);
-                $data['image'] = $filename;
+                $data['image'] = $this->storeUpload($request->file('image'), 'partners', UploadConstraints::PARTNER_IMAGE_MIMES)['filename'];
             }
 
-            $partner = Partners::create($data);
+            $partner = $this->persistOrDiscard(fn () => Partners::create($data));
             
             return response()->json([
                 'success' => true,
@@ -266,12 +288,8 @@ class TeamPartnerController extends Controller
     {
         $partner = Partners::findOrFail($id);
         
-        // Supprimer le logo si il existe
-        // if ($partner->image && Storage::exists('partners/' . $partner->image)) {
-        //     Storage::delete('partners/' . $partner->image);
-        // }
-        
         $partner->delete();
+        $this->deleteStoredFile($partner->image, 'partners');
         
         return response()->json([
             'success' => true,

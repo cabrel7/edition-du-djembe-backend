@@ -13,6 +13,10 @@ use Throwable;
 
 class Handler extends ExceptionHandler
 {
+    private const MESSAGE_NOT_FOUND = 'Ressource non trouvée';
+
+    private const MESSAGE_UNAUTHENTICATED = 'Non authentifié.';
+
     /**
      * A list of exception types with their corresponding custom log levels.
      *
@@ -60,10 +64,6 @@ class Handler extends ExceptionHandler
             return new JsonResponse(['success' => false, 'message' => self::MESSAGE_NOT_FOUND], Response::HTTP_NOT_FOUND);
         });
     }
-
-    private const MESSAGE_NOT_FOUND = 'Ressource non trouvée';
-
-    private const MESSAGE_UNAUTHENTICATED = 'Non authentifié.';
 
     /** Une requête /api/* attend toujours du JSON, même sans en-tête Accept. */
     private function isApiRequest(Request $request): bool

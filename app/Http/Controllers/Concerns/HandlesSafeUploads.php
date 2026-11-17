@@ -8,6 +8,29 @@ use Illuminate\Support\Str;
 
 trait HandlesSafeUploads
 {
+    /**
+     * Fichiers écrits PENDANT la requête courante : [nom, répertoire, privé?].
+     * Servent uniquement à nettoyer les nouveaux fichiers si l'enregistrement en base échoue
+     * (jamais à supprimer un fichier préexistant). Réinitialisé par beginUploads().
+     *
+     * @var array<int, array{0: string, 1: string, 2: bool}>
+     */
+    private array $newUploads = [];
+
+    private function beginUploads(): void
+    {
+        $this->newUploads = [];
+    }
+
+    /** Supprime les fichiers fraîchement écrits (échec d'enregistrement) ; jamais d'exception. */
+    private function discardNewUploads(): void
+    {
+        foreach ($this->newUploads as [$name, $directory, $private]) {
+            $this->deleteStoredFile($name, $directory, $private);
+        }
+        $this->newUploads = [];
+    }
+
     private function safeExt(UploadedFile $file, string $allowedMimes): string
     {
         $allowed = explode(',', $allowedMimes);
@@ -21,6 +44,7 @@ trait HandlesSafeUploads
         $extension = $this->safeExt($file, $allowedMimes);
         $filename = Str::random(20) . '.' . $extension;
         $file->move(public_path($directory), $filename);
+        $this->newUploads[] = [$filename, $directory, false];
 
         return ['filename' => $filename, 'extension' => $extension];
     }
@@ -34,6 +58,7 @@ trait HandlesSafeUploads
         $extension = $this->safeExt($file, $allowedMimes);
         $filename = Str::random(20) . '.' . $extension;
         $file->move(self::privateDir($directory), $filename);
+        $this->newUploads[] = [$filename, $directory, true];
 
         return ['filename' => $filename, 'extension' => $extension];
     }
@@ -72,6 +97,53 @@ trait HandlesSafeUploads
         $ext = strtolower((string) preg_replace('/[^A-Za-z0-9]/', '', $extension));
 
         return $ext !== '' ? $base . '.' . $ext : $base;
+    }
+
+    /**
+     * Extension RÉELLE du fichier servi (nom résolu sur disque) ; à défaut l'extension
+     * déclarée en base (colonne `extension`, absente sur certaines bases), puis celle du nom stocké.
+     */
+    private function downloadExtension(string $resolvedPath, ?string $declared = null, ?string $storedName = null): string
+    {
+        foreach ([pathinfo($resolvedPath, PATHINFO_EXTENSION), (string) $declared, pathinfo((string) $storedName, PATHINFO_EXTENSION)] as $candidate) {
+            $clean = strtolower((string) preg_replace('/[^A-Za-z0-9]/', '', (string) $candidate));
+            if ($clean !== '') {
+                return $clean;
+            }
+        }
+
+        return '';
+    }
+
+    /**
+     * Supprime un fichier REMPLACÉ (après persistance réussie). basename + répertoire attendu
+     * uniquement ; URL externe / vide ignorées ; échec = warning loggué, jamais une erreur utilisateur.
+     */
+    private function deleteStoredFile(?string $stored, string $directory, bool $private = false): void
+    {
+        app(\App\Services\StoredFileService::class)->delete($stored, $directory, $private);
+    }
+
+    /**
+     * Booléen robuste depuis la requête : "1"/"0"/"true"/"false"/true/false.
+     * null = champ absent (ou valeur illisible) : l'appelant ne doit PAS l'écrire.
+     */
+    private function presentBool(\Illuminate\Http\Request $request, string $key): ?bool
+    {
+        if (!$request->exists($key) || $request->input($key) === null) {
+            return null;
+        }
+
+        return filter_var($request->input($key), FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+    }
+
+    /** Remplace "true"/"false"/"on"/"yes"... par un vrai booléen avant validation (règle `boolean`). */
+    private function normalizeBoolInput(\Illuminate\Http\Request $request, string $key): void
+    {
+        $parsed = $this->presentBool($request, $key);
+        if ($parsed !== null) {
+            $request->merge([$key => $parsed]);
+        }
     }
 
     private function uniqueSlug(string $table, string $title): string

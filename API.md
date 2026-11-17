@@ -255,6 +255,25 @@ Toutes les routes ci-dessous exigent d'être authentifié (`edj_token` ou
 | GET | `/api/getarticle` | `articles` + `nexturl`, `hasmore` |
 | GET | `/api/getmemoir` | `memoirs` + `nexturl`, `hasmore` |
 
+### Idempotence des créations — en-tête `Idempotency-Key`
+
+Les POST de **création** (`saveArticle|Memoir|Book|Video|Domaine|Categorie|Service`
+sans `id`, `POST /team_members`, `POST /partners`, `POST /admin/press-reviews`) acceptent
+`Idempotency-Key: <uuid v4>`. Réutiliser la même clé pour tout retry du même formulaire.
+
+- Sans en-tête, ou avec `id` (update) : comportement inchangé.
+- Clé invalide (non UUID, > 64 car.) : `400 {success:false,message}`.
+- Succès 2xx mémorisé 24 h par (utilisateur, méthode, chemin, clé) ; un retry renvoie la même
+  réponse avec `Idempotent-Replayed: true`, sans ré-exécuter (ni ligne, ni upload).
+- Même clé + corps/fichiers différents : `422`.
+- Requête concurrente : attend jusqu'à 5 s puis rejoue ; sinon `409` + `Retry-After: 2`.
+- Les 4xx/5xx ne sont pas mémorisés (retry possible après correction).
+- Cache HS : requête exécutée sans protection (warning loggué).
+- Limites connues : le verrou d'exécution dure au plus **120 s** (`idempotency.lock_seconds`) ; une
+  requête plus lente peut être rejouée en parallèle (doublon possible). L'empreinte des fichiers
+  envoyés = **nom + taille** (pas le contenu) : deux fichiers distincts de mêmes nom et taille sont
+  considérés identiques pour une même clé.
+
 ### Contenus (create/update)
 
 Tous en `POST`, champs partiels autorisés à la mise à jour (envoyez `id` pour
@@ -308,10 +327,11 @@ d'intégrité).
 
 | Méthode | Chemin | Description |
 |---|---|---|
-| GET | `/` | Liste + stats (filtres : `status`, `category`, `search`, `featured`, `order_by`, `order_dir`, `per_page`) |
+| GET | `/` | Liste + stats (filtres : `status`, `category`, `search`, `featured`, `order_by` ∈ `published_at|created_at|updated_at|title|views|category|status` (sinon défaut), `order_dir` `asc|desc` (défaut desc), `per_page` 1..50) |
 | GET | `/{id}` | Détail |
-| POST | `/` | Création (`multipart/form-data`) : `title` ✅, `summary` ✅, `content` ✅, `category` ✅ (`interview|critique|reportage|article|autre`), `status` ✅ (`draft|published|archived`), `subtitle`, `author`, `source`, `source_url`, `publication_date`, `published_at`, `tags` (tableau), `cover_image` (image ≤5 Mo), `gallery_images.*`, `documents.*`, `video_url`, `audio_url` (slug et `is_featured` gérés automatiquement / par la route dédiée) |
-| PUT | `/{id}` | Mise à jour (partielle) |
+| POST | `/` | Création (`multipart/form-data`) : `title` ✅, `summary` ✅, `content` ✅, `category` ✅ (`interview|critique|reportage|article|autre`), `status` ✅ (`draft|published|archived`), `subtitle`, `author`, `source`, `source_url`, `publication_date`, `published_at`, `tags` (tableau ≤20 éléments, chacun ≤50 car.), `tags_present` (`1` : si `tags` est absent/vide, la liste est vidée ; sans `tags` ni `tags_present`, les tags existants sont conservés), `cover_image` (image ≤5 Mo), `gallery_images.*`, `documents.*`, `video_url`, `audio_url` (slug et `is_featured` gérés automatiquement / par la route dédiée) |
+| PUT | `/{id}` | Mise à jour (partielle). Documents : `existing_documents` = chaîne JSON (ou tableau) des chemins relatifs à CONSERVER (tels que renvoyés par l'API). Les documents absents de la liste sont retirés puis leurs fichiers supprimés après l'enregistrement ; `[]` explicite = tous retirés ; clé absente ou liste illisible = aucun retrait. Seuls des documents déjà liés à cette revue sont concernés (basename, jamais de chemin client). Un document retiré dont le contenu est ré-envoyé dans `documents` est conservé ; les nouveaux `documents` sont ajoutés (dédoublonnés par sha256). Même logique pour `existing_gallery_images`. |
+| DELETE | `/{id}/documents/{filename}` | Retire un document (basename) de cette revue ; `404` s'il n'appartient pas à la revue ; fichier supprimé après mise à jour en base |
 | PUT | `/{id}/status` | `{ "status": "published" }` |
 | PUT | `/{id}/featured` | Bascule article à la une |
 | POST | `/upload-image` | `multipart/form-data`, champ `image` → `{ "url": "..." }` |

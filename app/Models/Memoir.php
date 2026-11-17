@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Casts\LenientJsonArray;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
@@ -35,7 +36,7 @@ class Memoir extends Model
     protected $casts = [
         'year' => 'integer',
         'defense_date' => 'date',
-        'keywords' => 'array',
+        'keywords' => LenientJsonArray::class,
         'views_count' => 'integer',
         'downloads_count' => 'integer',
         'file_size' => 'integer'

@@ -102,10 +102,11 @@ class UserController extends Controller
 
 
         try {
-            return response()->download($filePath, $book->title . '.' . $book->extension, [
-                'Content-Type' => 'application/pdf',
-                'Content-Disposition' => 'attachment; filename="' . $book->title . '.' . $book->extension . '"'
-            ]);
+            // Extension du fichier réellement servi (l'extrait) ; `extension` peut être absente en base.
+            return response()->download($filePath, $this->safeDownloadName(
+                (string) $book->title,
+                $this->downloadExtension($filePath, $book->extension ?? null, $book->extraitdocument)
+            ));
         } catch (\Throwable $e) {
             \Illuminate\Support\Facades\Log::error('Erreur lors du téléchargement du livre', ['id' => $id, 'error' => $e->getMessage()]);
 
@@ -134,10 +135,10 @@ class UserController extends Controller
             ], 404);
         }
         try {
-            $response = response()->download($filePath, $memoir->title . '.pdf', [
-                'Content-Type' => 'application/pdf',
-                'Content-Disposition' => 'attachment; filename="' . $memoir->title . '.' . $memoir->extension . '"'
-            ]);
+            $response = response()->download($filePath, $this->safeDownloadName(
+                (string) $memoir->title,
+                $this->downloadExtension($filePath, $memoir->extension, $memoir->document)
+            ));
         } catch (\Throwable $e) {
             \Illuminate\Support\Facades\Log::error('Erreur lors du téléchargement du mémoire', ['id' => $id, 'error' => $e->getMessage()]);
 

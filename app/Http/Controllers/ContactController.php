@@ -9,15 +9,18 @@ use Illuminate\Support\Facades\Validator;
 
 class ContactController extends Controller
 {
+    private const DEFAULT_PER_PAGE = 20;
+    private const MAX_PER_PAGE = 50;
+
+    use \App\Http\Controllers\Concerns\EnsuresAdminRole;
+
     /**
      * Récupère tous les contacts (pour l'admin)
      */
     public function index(Request $request)
     {
-        $user = auth()->user();
-        
-        if (!$user || $user->role != 1) {
-            return response()->json(['message' => 'Unauthorized'], 401);
+        if ($denied = $this->denyUnlessAdmin()) {
+            return $denied;
         }
 
         // Récupérer les paramètres de requête
@@ -25,7 +28,7 @@ class ContactController extends Controller
         $search = $request->query('search');
         $dateFrom = $request->query('date_from');
         $dateTo = $request->query('date_to');
-        $perPage = $request->query('per_page', 20);
+        $perPage = min(max((int) $request->query('per_page', self::DEFAULT_PER_PAGE), 1), self::MAX_PER_PAGE);
         
         // Commencer la requête
         $query = Contact::select();
@@ -77,10 +80,8 @@ class ContactController extends Controller
      */
     public function show($id)
     {
-        $user = auth()->user();
-        
-        if (!$user || $user->role != 1) {
-            return response()->json(['message' => 'Unauthorized'], 401);
+        if ($denied = $this->denyUnlessAdmin()) {
+            return $denied;
         }
         
         $contact = Contact::find($id);
@@ -133,10 +134,8 @@ class ContactController extends Controller
      */
     public function updateStatus(Request $request, $id)
     {
-        $user = auth()->user();
-        
-        if (!$user || $user->role != 1) {
-            return response()->json(['message' => 'Unauthorized'], 401);
+        if ($denied = $this->denyUnlessAdmin()) {
+            return $denied;
         }
         
         $validator = Validator::make($request->all(), [
@@ -172,10 +171,8 @@ class ContactController extends Controller
      */
     public function destroy($id)
     {
-        $user = auth()->user();
-        
-        if (!$user || $user->role != 1) {
-            return response()->json(['message' => 'Unauthorized'], 401);
+        if ($denied = $this->denyUnlessAdmin()) {
+            return $denied;
         }
         
         $contact = Contact::find($id);
@@ -196,10 +193,8 @@ class ContactController extends Controller
      */
     public function statistics()
     {
-        $user = auth()->user();
-        
-        if (!$user || $user->role != 1) {
-            return response()->json(['message' => 'Unauthorized'], 401);
+        if ($denied = $this->denyUnlessAdmin()) {
+            return $denied;
         }
         
         $total = Contact::count();

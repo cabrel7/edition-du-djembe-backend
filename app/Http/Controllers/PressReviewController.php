@@ -4,16 +4,32 @@
 namespace App\Http\Controllers;
 
 use App\Models\PressReview;
+use App\Services\GalleryService;
+use App\Services\GalleryStorageException;
+use App\Services\PressReviewDocumentService;
 use App\Support\UploadConstraints;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
-use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Log;
 class PressReviewController extends Controller
 {
     use \App\Http\Controllers\Concerns\HandlesSafeUploads;
+    use \App\Http\Controllers\Concerns\EnsuresAdminRole;
+
+    private const COVERS_DIR = 'press-reviews/covers';
+    private const DOCUMENTS_DIR = PressReviewDocumentService::DOCUMENTS_DIR;
+    private const MAX_PER_PAGE = 50;
+    private const SORTABLE_COLUMNS = ['published_at', 'created_at', 'updated_at', 'title', 'views', 'category', 'status'];
+    private const MAX_TAGS = 20;
+    private const MAX_TAG_LENGTH = 50;
+
+    public function __construct(
+        private readonly GalleryService $gallery,
+        private readonly PressReviewDocumentService $documents
+    )
+    {
+    }
 
     // ==================== PARTIE PUBLIQUE ====================
 
@@ -42,12 +58,13 @@ class PressReviewController extends Controller
         }
 
         // Tri
-        $orderBy = $request->get('order_by', 'published_at');
-        $orderDir = $request->get('order_dir', 'desc');
-        $query->orderBy($orderBy, $orderDir);
+        $query->orderBy(
+            $this->sortColumn($request->query('order_by'), 'published_at'),
+            $this->sortDirection($request->query('order_dir'))
+        );
 
         // Pagination
-        $perPage = $request->get('per_page', 12);
+        $perPage = $this->perPage($request->query('per_page'), 12);
         $pressReviews = $query->paginate($perPage);
 
         // Statistiques
@@ -167,10 +184,8 @@ class PressReviewController extends Controller
      */
     public function adminIndex(Request $request)
     {
-        $user = auth()->user();
-        
-        if (!$user || $user->role != 1) {
-            return response()->json(['message' => 'Unauthorized'], 401);
+        if ($denied = $this->denyUnlessAdmin()) {
+            return $denied;
         }
 
         $query = PressReview::query();
@@ -193,11 +208,12 @@ class PressReviewController extends Controller
         }
 
         // Tri
-        $orderBy = $request->get('order_by', 'created_at');
-        $orderDir = $request->get('order_dir', 'desc');
-        $query->orderBy($orderBy, $orderDir);
+        $query->orderBy(
+            $this->sortColumn($request->query('order_by'), 'created_at'),
+            $this->sortDirection($request->query('order_dir'))
+        );
 
-        $perPage = $request->get('per_page', 20);
+        $perPage = $this->perPage($request->query('per_page'), 20);
         $pressReviews = $query->paginate($perPage);
 
         // Statistiques (3 requêtes au lieu de 9 COUNT séparés)
@@ -235,10 +251,8 @@ class PressReviewController extends Controller
      */
     public function adminShow($id)
     {
-        $user = auth()->user();
-        
-        if (!$user || $user->role != 1) {
-            return response()->json(['message' => 'Unauthorized'], 401);
+        if ($denied = $this->denyUnlessAdmin()) {
+            return $denied;
         }
 
         $pressReview = PressReview::find($id);
@@ -261,11 +275,12 @@ class PressReviewController extends Controller
      */
     public function store(Request $request)
     {
-        $user = auth()->user();
-        
-        if (!$user || $user->role != 1) {
-            return response()->json(['message' => 'Unauthorized'], 401);
+        if ($denied = $this->denyUnlessAdmin()) {
+            return $denied;
         }
+
+        $this->normalizeMultiUploads($request);
+        $this->beginUploads();
 
         $validator = Validator::make($request->all(), [
             'title' => 'required|string|max:255',
@@ -282,7 +297,9 @@ class PressReviewController extends Controller
             'video_url' => 'nullable|url|max:500',
             'audio_url' => 'nullable|url|max:500',
             'category' => 'required|in:interview,critique,reportage,article,autre',
-            'tags' => 'nullable|array',
+            'tags' => 'nullable|array|max:' . self::MAX_TAGS,
+            'tags.*' => 'nullable|string|max:' . self::MAX_TAG_LENGTH,
+            'tags_present' => 'nullable|boolean',
             // 'is_featured' => 'boolean',
             'status' => 'required|in:draft,published,archived',
             'published_at' => 'nullable|date',
@@ -303,51 +320,24 @@ class PressReviewController extends Controller
                 'source', 'source_url', 'publication_date', 'video_url', 'audio_url',
                 'category', 'tags', 'is_featured', 'status', 'published_at'
             ]);
+            $this->applyTags($request, $data);
 			$data['is_featured']=!empty($data['is_featured'])?1:0;
             if (isset($data['content'])) {
                 $data['content'] = $this->sanitizeHtml($data['content']);
             }
             // Gestion de l'image de couverture
             if ($request->hasFile('cover_image')) {
-                $file = $request->file('cover_image');
-            $filename = Str::random(20) . '.' . $this->safeExt($file, UploadConstraints::IMAGE_MIMES);
-            $file->move(public_path('press-reviews/covers'), $filename);
-            $path = 'press-reviews/covers/' . $filename;
-            $data['cover_image'] = $path;
-
+                $data['cover_image'] = $this->storeCover($request->file('cover_image'));
             }
 
             // Gestion de la galerie d'images (dédoublonnée par contenu)
             if ($request->hasFile('gallery_images')) {
-                $data['gallery_images'] = $this->mergeGalleryImages([], $request->file('gallery_images'));
+                $data['gallery_images'] = $this->trackNewGallery([], $this->gallery->merge([], $request->file('gallery_images')));
             }
 
             // Gestion des documents
             if ($request->hasFile('documents')) {
-             $documentPaths = [];
-
-foreach ($request->file('documents') as $doc) {
-
-    $filename = Str::random(20) . '.' . $this->safeExt($doc, UploadConstraints::DOCUMENT_MIMES);
-
-    // 🔥 récupérer les infos AVANT le move
-    $originalName = $doc->getClientOriginalName();
-    $size = $doc->getSize();
-    $type = $doc->getMimeType();
-
-    $doc->move(public_path('press-reviews/documents/'), $filename);
-
-    $path = 'press-reviews/documents/' . $filename;
-
-    $documentPaths[] = [
-        'path' => $path,
-        'name' => $originalName,
-        'size' => $size,
-        'type' => $type
-    ];
-}
-
-                $data['documents'] = $documentPaths;
+                $data['documents'] = $this->storeDocuments([], $request->file('documents'));
             }
 
             // Date de publication
@@ -363,7 +353,12 @@ foreach ($request->file('documents') as $doc) {
                 'data' => $pressReview
             ], 201);
 
+        } catch (GalleryStorageException $e) {
+            $this->discardNewUploads();
+
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
         } catch (\Exception $e) {
+            $this->discardNewUploads();
             Log::error('Erreur lors de la création d\'une revue de presse', ['error' => $e->getMessage()]);
 
             return response()->json([
@@ -378,10 +373,8 @@ foreach ($request->file('documents') as $doc) {
      */
     public function update(Request $request, $id)
     {
-        $user = auth()->user();
-        
-        if (!$user || $user->role != 1) {
-            return response()->json(['message' => 'Unauthorized'], 401);
+        if ($denied = $this->denyUnlessAdmin()) {
+            return $denied;
         }
 
         $pressReview = PressReview::find($id);
@@ -392,6 +385,9 @@ foreach ($request->file('documents') as $doc) {
                 'message' => 'Revue de presse non trouvée'
             ], 404);
         }
+
+        $this->normalizeMultiUploads($request);
+        $this->beginUploads();
 
         $validator = Validator::make($request->all(), [
             'title' => 'sometimes|required|string|max:255',
@@ -408,7 +404,9 @@ foreach ($request->file('documents') as $doc) {
             'video_url' => 'nullable|url|max:500',
             'audio_url' => 'nullable|url|max:500',
             'category' => 'sometimes|required|in:interview,critique,reportage,article,autre',
-            'tags' => 'nullable|array',
+            'tags' => 'nullable|array|max:' . self::MAX_TAGS,
+            'tags.*' => 'nullable|string|max:' . self::MAX_TAG_LENGTH,
+            'tags_present' => 'nullable|boolean',
             
             'status' => 'sometimes|required|in:draft,published,archived',
             'published_at' => 'nullable|date',
@@ -429,26 +427,16 @@ foreach ($request->file('documents') as $doc) {
                 'source', 'source_url', 'publication_date', 'video_url', 'audio_url',
                 'category', 'tags', 'is_featured', 'status', 'published_at'
             ]);
+            $this->applyTags($request, $data);
             if (isset($data['content'])) {
                 $data['content'] = $this->sanitizeHtml($data['content']);
             }
 
-            // Gestion de l'image de couverture
+            // Gestion de l'image de couverture (l'ancienne n'est supprimée qu'APRÈS la persistance)
+            $oldCover = null;
             if ($request->hasFile('cover_image')) {
-                // Supprimer l'ancienne image
-                if ($pressReview->cover_image) {
-                    $imagePath = public_path($pressReview->cover_image);
-                    if (File::exists($imagePath)) {
-                      File::delete($imagePath); // Ou unlink($imagePath);
-                    }   
-                 
-                }
-                    $file = $request->file('cover_image');
-            $filename = Str::random(20) . '.' . $this->safeExt($file, UploadConstraints::IMAGE_MIMES);
-            $file->move(public_path('press-reviews/covers'), $filename);
-            $path = 'press-reviews/covers/' . $filename;
-            $data['cover_image'] = $path;
-
+                $oldCover = $pressReview->cover_image;
+                $data['cover_image'] = $this->storeCover($request->file('cover_image'));
             }
 
             // Galerie : retrait des images non conservées (existing_gallery_images, si fourni)
@@ -460,37 +448,21 @@ foreach ($request->file('documents') as $doc) {
             if ($hasKeepList || $uploads !== []) {
                 $current = is_array($pressReview->gallery_images) ? $pressReview->gallery_images : [];
                 if ($hasKeepList) {
-                    $current = $this->pruneGallery($current, $request->input('existing_gallery_images'), $uploads, $removedGallery);
+                    $current = $this->gallery->prune($current, $request->input('existing_gallery_images'), $uploads, $removedGallery);
                 }
-                $data['gallery_images'] = $this->mergeGalleryImages($current, $uploads);
+                $data['gallery_images'] = $this->trackNewGallery($current, $this->gallery->merge($current, $uploads));
             }
 
-            // Gestion des documents (ajout, sans effacer les documents existants)
-            if ($request->hasFile('documents')) {
-               $documentPaths = is_array($pressReview->documents) ? $pressReview->documents : [];
-
-foreach ($request->file('documents') as $doc) {
-
-    $filename = Str::random(20) . '.' . $this->safeExt($doc, UploadConstraints::DOCUMENT_MIMES);
-
-    // 🔥 récupérer les infos AVANT le move
-    $originalName = $doc->getClientOriginalName();
-    $size = $doc->getSize();
-    $type = $doc->getMimeType();
-
-    $doc->move(public_path('press-reviews/documents/'), $filename);
-
-    $path = 'press-reviews/documents/' . $filename;
-
-    $documentPaths[] = [
-        'path' => $path,
-        'name' => $originalName,
-        'size' => $size,
-        'type' => $type
-    ];
-}
-
-                $data['documents'] = $documentPaths;
+            // Documents : retrait des non conservés (existing_documents, si fourni) puis ajout idempotent.
+            $docUploads = $request->file('documents');
+            $docUploads = is_array($docUploads) ? $docUploads : [];
+            $removedDocs = [];
+            if ($request->has('existing_documents') || $docUploads !== []) {
+                $docs = is_array($pressReview->documents) ? $pressReview->documents : [];
+                if ($request->has('existing_documents')) {
+                    $docs = $this->documents->prune($docs, $request->input('existing_documents'), $docUploads, $removedDocs);
+                }
+                $data['documents'] = $this->storeDocuments($docs, $this->documents->newUploads($docs, $docUploads));
             }
 
             // Mise à jour de la date de publication
@@ -499,11 +471,13 @@ foreach ($request->file('documents') as $doc) {
             }
 
             $pressReview->update($data);
+            // Persisté : les nouveaux fichiers sont désormais référencés, plus rien à nettoyer si la suite échoue.
+            $this->beginUploads();
 
             // Suppression disque APRÈS la persistance : un échec en base ne laisse pas de références mortes.
-            foreach ($removedGallery as $removedPath) {
-                File::delete(public_path(self::GALLERY_DIR . '/' . basename($removedPath)));
-            }
+            $this->gallery->deleteFiles($removedGallery);
+            $this->documents->deleteFiles($removedDocs);
+            $this->deleteStoredFile($oldCover, self::COVERS_DIR);
 
             return response()->json([
                 'success' => true,
@@ -511,7 +485,12 @@ foreach ($request->file('documents') as $doc) {
                 'data' => $pressReview->fresh()
             ], 200);
 
+        } catch (GalleryStorageException $e) {
+            $this->discardNewUploads();
+
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
         } catch (\Exception $e) {
+            $this->discardNewUploads();
             Log::error('Erreur lors de la mise à jour d\'une revue de presse', ['id' => $id, 'error' => $e->getMessage()]);
 
             return response()->json([
@@ -526,10 +505,8 @@ foreach ($request->file('documents') as $doc) {
      */
     public function destroy($id)
     {
-        $user = auth()->user();
-        
-        if (!$user || $user->role != 1) {
-            return response()->json(['message' => 'Unauthorized'], 401);
+        if ($denied = $this->denyUnlessAdmin()) {
+            return $denied;
         }
 
         $pressReview = PressReview::find($id);
@@ -542,36 +519,16 @@ foreach ($request->file('documents') as $doc) {
         }
 
         try {
-            // Supprimer les fichiers associés
-            if ($pressReview->cover_image) {
-              
-                  $imagePath = public_path($pressReview->cover_image);
-                    if (File::exists($imagePath)) {
-                      File::delete($imagePath); // Ou unlink($imagePath);
-                    }   
-            }
-
-            if ($pressReview->gallery_images) {
-                foreach ($pressReview->gallery_images as $image) {
-                      $imagePath = public_path($image);
-                    if (File::exists($imagePath)) {
-                      File::delete($imagePath); // Ou unlink($imagePath);
-                    }   
-                    // Storage::disk('public')->delete($image);
-                }
-            }
-
-            if ($pressReview->documents) {
-                foreach ($pressReview->documents as $doc) {
-                        $docPath = public_path($doc['path'] ?? $doc);
-                    if (File::exists($docPath)) {
-                      File::delete($docPath); // Ou unlink($imagePath);
-                    }  
-                    // Storage::disk('public')->delete($doc['path'] ?? $doc);
-                }
-            }
+            // Fichiers collectés AVANT la suppression, effacés APRÈS : un échec en base ne laisse pas de références mortes.
+            $gallery = is_array($pressReview->gallery_images) ? $pressReview->gallery_images : [];
+            $documents = is_array($pressReview->documents) ? $pressReview->documents : [];
+            $cover = $pressReview->cover_image;
 
             $pressReview->delete();
+
+            $this->deleteStoredFile($cover, self::COVERS_DIR);
+            $this->gallery->deleteFiles($gallery);
+            $this->documents->deleteFiles($documents);
 
             return response()->json([
                 'success' => true,
@@ -593,10 +550,8 @@ foreach ($request->file('documents') as $doc) {
      */
     public function updateStatus(Request $request, $id)
     {
-        $user = auth()->user();
-        
-        if (!$user || $user->role != 1) {
-            return response()->json(['message' => 'Unauthorized'], 401);
+        if ($denied = $this->denyUnlessAdmin()) {
+            return $denied;
         }
 
         $validator = Validator::make($request->all(), [
@@ -641,10 +596,8 @@ foreach ($request->file('documents') as $doc) {
      */
     public function toggleFeatured($id)
     {
-        $user = auth()->user();
-        
-        if (!$user || $user->role != 1) {
-            return response()->json(['message' => 'Unauthorized'], 401);
+        if ($denied = $this->denyUnlessAdmin()) {
+            return $denied;
         }
 
         $pressReview = PressReview::find($id);
@@ -670,14 +623,187 @@ foreach ($request->file('documents') as $doc) {
     }
 
     /**
+     * Retire UNE image de la galerie (basename uniquement, doit appartenir à CETTE revue).
+     * Le fichier n'est supprimé qu'après la mise à jour en base.
+     */
+    public function deleteGalleryImage($id, string $filename)
+    {
+        if ($denied = $this->denyUnlessAdmin()) {
+            return $denied;
+        }
+
+        $pressReview = PressReview::find($id);
+        $current = $pressReview && is_array($pressReview->gallery_images) ? $pressReview->gallery_images : [];
+        $result = $pressReview ? $this->gallery->without($current, $filename) : null;
+
+        if ($result === null) {
+            return response()->json(['success' => false, 'message' => 'Image de galerie non trouvée'], 404);
+        }
+
+        [$remaining, $removedPath] = $result;
+
+        try {
+            $pressReview->update(['gallery_images' => $remaining]);
+        } catch (\Exception $e) {
+            Log::error('Erreur lors du retrait d\'une image de galerie', ['id' => $id, 'error' => $e->getMessage()]);
+
+            return response()->json(['success' => false, 'message' => 'Erreur lors de la suppression de l\'image'], 500);
+        }
+
+        $this->gallery->deleteFiles([$removedPath]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Image supprimée de la galerie',
+            'data' => $pressReview->fresh(),
+        ], 200);
+    }
+
+    /** Retire un document d'une revue (appartenance vérifiée) ; fichier supprimé après la mise à jour en base. */
+    public function deleteDocument($id, string $filename)
+    {
+        if ($denied = $this->denyUnlessAdmin()) {
+            return $denied;
+        }
+
+        $pressReview = PressReview::find($id);
+        $current = $pressReview && is_array($pressReview->documents) ? $pressReview->documents : [];
+        $result = $pressReview ? $this->documents->without($current, $filename) : null;
+
+        if ($result === null) {
+            return response()->json(['success' => false, 'message' => 'Document non trouvé'], 404);
+        }
+
+        [$remaining, $removed] = $result;
+
+        try {
+            $pressReview->update(['documents' => $remaining]);
+        } catch (\Exception $e) {
+            Log::error('Erreur lors du retrait d\'un document', ['id' => $id, 'error' => $e->getMessage()]);
+
+            return response()->json(['success' => false, 'message' => 'Erreur lors de la suppression du document'], 500);
+        }
+
+        $this->documents->deleteFiles([$removed]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Document supprimé',
+            'data' => $pressReview->fresh(),
+        ], 200);
+    }
+
+    /** Couverture : écrite sous covers/, suivie pour nettoyage si l'enregistrement échoue. */
+    /**
+     * Tags : `tags_present` truthy + `tags` absent/vide => liste vidée ; ni l'un ni l'autre => inchangés.
+     * Valeurs nettoyées (trim, vides retirées, dédoublonnées).
+     */
+    private function applyTags(Request $request, array &$data): void
+    {
+        $hasTags = $request->has('tags');
+        if (!$hasTags && !$request->boolean('tags_present')) {
+            unset($data['tags']);
+
+            return;
+        }
+
+        $raw = is_array($request->input('tags')) ? $request->input('tags') : [];
+        $clean = array_filter(array_map(static fn ($t) => is_string($t) ? trim($t) : '', $raw), static fn (string $t) => $t !== '');
+        $data['tags'] = array_values(array_unique($clean));
+    }
+
+    private function sortColumn(mixed $requested, string $default): string
+    {
+        return is_string($requested) && in_array($requested, self::SORTABLE_COLUMNS, true) ? $requested : $default;
+    }
+
+    private function sortDirection(mixed $requested): string
+    {
+        return is_string($requested) && strtolower($requested) === 'asc' ? 'asc' : 'desc';
+    }
+
+    private function perPage(mixed $requested, int $default): int
+    {
+        $value = is_numeric($requested) ? (int) $requested : $default;
+
+        return min(max($value, 1), self::MAX_PER_PAGE);
+    }
+
+    private function storeCover(\Illuminate\Http\UploadedFile $file): string
+    {
+        $stored = $this->storeUpload($file, self::COVERS_DIR, UploadConstraints::IMAGE_MIMES);
+
+        return self::COVERS_DIR . '/' . $stored['filename'];
+    }
+
+    /**
+     * Ajoute les documents à la liste existante ; chaque fichier écrit est suivi pour nettoyage.
+     * Métadonnées lues AVANT le déplacement (le fichier temporaire disparaît après move).
+     *
+     * @param array<int, mixed> $existing
+     * @param \Illuminate\Http\UploadedFile[] $files
+     * @return array<int, mixed>
+     */
+    private function storeDocuments(array $existing, array $files): array
+    {
+        foreach ($files as $doc) {
+            $originalName = $doc->getClientOriginalName();
+            $size = $doc->getSize();
+            $type = $doc->getMimeType();
+            $stored = $this->storeUpload($doc, self::DOCUMENTS_DIR, UploadConstraints::DOCUMENT_MIMES);
+
+            $existing[] = [
+                'path' => self::DOCUMENTS_DIR . '/' . $stored['filename'],
+                'name' => $originalName,
+                'size' => $size,
+                'type' => $type,
+            ];
+        }
+
+        return $existing;
+    }
+
+    /**
+     * Enregistre pour nettoyage les images de galerie ajoutées par merge() (absentes de $before).
+     *
+     * @param string[] $before
+     * @param string[] $after
+     * @return string[]
+     */
+    private function trackNewGallery(array $before, array $after): array
+    {
+        foreach (array_diff($after, $before) as $path) {
+            $this->newUploads[] = [basename((string) $path), GalleryService::GALLERY_DIR, false];
+        }
+
+        return $after;
+    }
+
+    /**
+     * Un fichier unique envoyé sous gallery_images / documents (non tableau) est ignoré par
+     * les règles `.*` (donc NON validé) : on le normalise en tableau avant validation.
+     */
+    private function normalizeMultiUploads(Request $request): void
+    {
+        foreach (['gallery_images', 'documents'] as $key) {
+            $value = $request->files->get($key);
+            if ($value instanceof \Illuminate\Http\UploadedFile) {
+                $request->files->set($key, [$value]);
+                // Request::allFiles() met les fichiers convertis en cache : on l'invalide.
+                (function (): void {
+                    $this->convertedFiles = null;
+                })->call($request);
+            }
+        }
+    }
+
+    /**
      * Upload d'image via l'éditeur de texte
      */
     public function uploadImage(Request $request)
     {
-        $user = auth()->user();
-        
-        if (!$user || $user->role != 1) {
-            return response()->json(['message' => 'Unauthorized'], 401);
+        if ($denied = $this->denyUnlessAdmin()) {
+            return $denied;
         }
 
         $validator = Validator::make($request->all(), [
@@ -705,90 +831,6 @@ foreach ($request->file('documents') as $doc) {
             'success' => true,
             'url' => asset('press-reviews/editor/' . $filename)
         ], 200);
-    }
-
-    private const GALLERY_DIR = 'press-reviews/gallery';
-
-    private const HASH_ALGO = 'sha256';
-
-    private function galleryFileHash(string $relativePath): ?string
-    {
-        // basename : on ne résout jamais hors du dossier galerie, quelle que soit la valeur stockée/envoyée.
-        $full = public_path(self::GALLERY_DIR . '/' . basename($relativePath));
-
-        return is_file($full) ? (hash_file(self::HASH_ALGO, $full) ?: null) : null;
-    }
-
-    /**
-     * Retire de la galerie les images absentes de la liste à conserver
-     * (JSON ou tableau envoyé par le client) et supprime leurs fichiers.
-     * Seules des valeurs déjà présentes en base sont considérées (jamais de chemin client).
-     * Une image retirée dont le contenu est ré-envoyé dans la même requête est conservée
-     * (retry après réponse perdue : pas de suppression/recréation inutile).
-     *
-     * @param string[] $current
-     * @param \Illuminate\Http\UploadedFile[] $uploads
-     * @param string[] $removed rempli avec les chemins à supprimer (suppression différée par l'appelant)
-     * @return string[]
-     */
-    private function pruneGallery(array $current, mixed $keepInput, array $uploads, array &$removed): array
-    {
-        $keep = is_string($keepInput) ? json_decode($keepInput, true) : $keepInput;
-        // Repli sûr : liste illisible = aucune suppression (jamais de purge sur entrée malformée).
-        if (!is_array($keep)) {
-            return $current;
-        }
-        $keep = array_map(fn ($v) => basename((string) $v), array_filter($keep, 'is_scalar'));
-
-        $uploadHashes = [];
-        foreach ($uploads as $file) {
-            $uploadHashes[hash_file(self::HASH_ALGO, $file->getRealPath())] = true;
-        }
-
-        $kept = [];
-        foreach ($current as $path) {
-            $hash = $this->galleryFileHash($path);
-            if (in_array(basename($path), $keep, true) || ($hash !== null && isset($uploadHashes[$hash]))) {
-                $kept[] = $path;
-                continue;
-            }
-            $removed[] = $path;
-        }
-
-        return $kept;
-    }
-
-    /**
-     * Ajout IDEMPOTENT : un fichier dont le contenu (sha256) est déjà dans la galerie
-     * de cette revue — ou déjà vu dans la même requête — n'est ni ajouté ni copié sur disque.
-     *
-     * @param string[] $current
-     * @param \Illuminate\Http\UploadedFile[]|\Illuminate\Http\UploadedFile $uploads
-     * @return string[] galerie finale complète
-     */
-    private function mergeGalleryImages(array $current, array|\Illuminate\Http\UploadedFile $uploads): array
-    {
-        $uploads = is_array($uploads) ? $uploads : [$uploads];
-        $seen = [];
-        foreach ($current as $path) {
-            $hash = $this->galleryFileHash($path);
-            if ($hash !== null) {
-                $seen[$hash] = true;
-            }
-        }
-
-        foreach ($uploads as $file) {
-            $hash = hash_file(self::HASH_ALGO, $file->getRealPath());
-            if ($hash === false || isset($seen[$hash])) {
-                continue;
-            }
-            $seen[$hash] = true;
-            $filename = Str::random(20) . '.' . $this->safeExt($file, UploadConstraints::IMAGE_MIMES);
-            $file->move(public_path(self::GALLERY_DIR), $filename);
-            $current[] = self::GALLERY_DIR . '/' . $filename;
-        }
-
-        return array_values($current);
     }
 
     /**

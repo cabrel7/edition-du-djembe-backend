@@ -28,7 +28,7 @@ Route::post('data/partner', [TeamPartnerController::class, 'getPartners']);
 
 // Broadcast::routes(['middleware' => ['auth:api']]);
 Route::controller(UserController::class)->group(function () {
-    route::post('/login', 'login')->middleware('throttle:6,1');
+    Route::post('/login', 'login')->middleware('throttle:6,1');
     // POST /register retiré : création de comptes réservée à l'admin (pas de self-signup).
     Route::get('/data/{type}', 'getdata');
     Route::get('/downloadmemoir/{id}', 'downloadmemoir');
@@ -42,8 +42,8 @@ Route::controller(UserController::class)->group(function () {
     Route::get('/memoirs/{idOrSlug}', 'showMemoir')->where('idOrSlug', '[^/]+');
     Route::get('/videos/{idOrSlug}', 'showVideo')->where('idOrSlug', '[^/]+');
     Route::get('/getbasedata', 'index');
-    route::post('/updatearticleview','updatearticleview');
-    route::post('/updatememoirview','updatememoirview');
+    Route::post('/updatearticleview','updatearticleview');
+    Route::post('/updatememoirview','updatememoirview');
 });
 
 
@@ -63,9 +63,11 @@ Route::middleware('auth:api')->post('/logout', [UserController::class, 'logout']
 Route::middleware(['auth:api', 'admin'])->group(function () {
     Route::get('/admin/press-reviews', [PressReviewController::class, 'adminIndex']);
     Route::get('/admin/press-reviews/{id}', [PressReviewController::class, 'adminShow']);
-    Route::post('/admin/press-reviews', [PressReviewController::class, 'store']);
+    Route::post('/admin/press-reviews', [PressReviewController::class, 'store'])->middleware('idempotent');
     Route::put('/admin/press-reviews/{id}', [PressReviewController::class, 'update']);
     Route::delete('/admin/press-reviews/{id}', [PressReviewController::class, 'destroy']);
+    Route::delete('/admin/press-reviews/{id}/gallery/{filename}', [PressReviewController::class, 'deleteGalleryImage'])->where('filename', '[^/]+');
+    Route::delete('/admin/press-reviews/{id}/documents/{filename}', [PressReviewController::class, 'deleteDocument'])->where('filename', '[^/]+');
     Route::put('/admin/press-reviews/{id}/status', [PressReviewController::class, 'updateStatus']);
     Route::put('/admin/press-reviews/{id}/featured', [PressReviewController::class, 'toggleFeatured']);
     Route::post('/admin/press-reviews/upload-image', [PressReviewController::class, 'uploadImage']);
@@ -82,7 +84,7 @@ Route::middleware(['auth:api', 'admin'])->group(function () {
 
     // Team members
     Route::get('team_members', [TeamPartnerController::class, 'adminGetTeamMembers']);
-    Route::post('team_members', [TeamPartnerController::class, 'saveTeamMember']);
+    Route::post('team_members', [TeamPartnerController::class, 'saveTeamMember'])->middleware('idempotent');
     Route::put('team_members/{id}', [TeamPartnerController::class, 'saveTeamMember']);
     // Alias POST : PHP ne parse pas le multipart/form-data d'un PUT (champs + fichier perdus).
     Route::post('team_members/{id}', [TeamPartnerController::class, 'saveTeamMember']);
@@ -90,7 +92,7 @@ Route::middleware(['auth:api', 'admin'])->group(function () {
 
     // Partners
     Route::get('partners', [TeamPartnerController::class, 'adminGetPartners']);
-    Route::post('partners', [TeamPartnerController::class, 'savePartner']);
+    Route::post('partners', [TeamPartnerController::class, 'savePartner'])->middleware('idempotent');
     Route::put('partners/{id}', [TeamPartnerController::class, 'savePartner']);
     Route::post('partners/{id}', [TeamPartnerController::class, 'savePartner']);
     Route::delete('partners/{id}', [TeamPartnerController::class, 'deletePartner']);
@@ -110,19 +112,19 @@ Route::middleware(['auth:api', 'admin'])->group(function () {
         Route::get('/getarticle', 'getarticle');
         Route::get('/getbook', 'getbook');
         Route::get('/adminbase', 'index');
-        Route::post('/saveDomaine', 'saveDomaine');
-        Route::post('/saveCategorie', 'saveCategorie');
-        Route::post('/saveVideo', 'saveVideo');
-        Route::post('/saveService', 'saveService');
-        Route::post('/saveArticle', 'saveArticle');
-        Route::post('/saveMemoir', 'saveMemoir');
-        Route::post('/saveBook', 'saveBook');
-        route::delete('/deleteDomaine/{id}', 'deleteDomaine');
-        route::delete('/deleteCategorie/{id}', 'deleteCategorie');
-        route::delete('/deleteVideo/{id}', 'deleteVideo');
-        route::delete('/deleteBook/{id}', 'deleteBook');
-        route::delete('/deleteService/{id}', 'deleteService');
-        route::delete('/deleteMemoir/{id}', 'deleteMemoir');
-        route::delete('/deleteArticle/{id}', 'deleteArticle');
+        Route::post('/saveDomaine', 'saveDomaine')->middleware('idempotent');
+        Route::post('/saveCategorie', 'saveCategorie')->middleware('idempotent');
+        Route::post('/saveVideo', 'saveVideo')->middleware('idempotent');
+        Route::post('/saveService', 'saveService')->middleware('idempotent');
+        Route::post('/saveArticle', 'saveArticle')->middleware('idempotent');
+        Route::post('/saveMemoir', 'saveMemoir')->middleware('idempotent');
+        Route::post('/saveBook', 'saveBook')->middleware('idempotent');
+        Route::delete('/deleteDomaine/{id}', 'deleteDomaine');
+        Route::delete('/deleteCategorie/{id}', 'deleteCategorie');
+        Route::delete('/deleteVideo/{id}', 'deleteVideo');
+        Route::delete('/deleteBook/{id}', 'deleteBook');
+        Route::delete('/deleteService/{id}', 'deleteService');
+        Route::delete('/deleteMemoir/{id}', 'deleteMemoir');
+        Route::delete('/deleteArticle/{id}', 'deleteArticle');
     });
 });

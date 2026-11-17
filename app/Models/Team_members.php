@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Casts\LenientJsonArray;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
@@ -24,7 +25,7 @@ class Team_members extends Model
     ];
 
     protected $casts = [
-        'social_links' => 'array',
+        'social_links' => LenientJsonArray::class,
         'is_active' => 'boolean',
         'display_order' => 'integer',
     ];

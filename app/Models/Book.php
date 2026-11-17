@@ -29,7 +29,8 @@ class Book extends Model
         'edition',
         'rating',
         'status',
-        'document'
+        'document',
+        'extension'
     ];
 
     protected $casts = [
