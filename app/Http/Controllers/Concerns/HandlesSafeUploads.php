@@ -31,6 +31,37 @@ trait HandlesSafeUploads
         $this->newUploads = [];
     }
 
+    /** Durée max (s) consacrée aux variantes WebP dans UNE requête ; le reste est laissé à app:optimize-images. */
+    private const VARIANT_REQUEST_BUDGET_SECONDS = 8.0;
+
+    /**
+     * À appeler APRÈS la persistance réussie : variante WebP des images publiques fraîchement
+     * écrites. Synchrone, plafonné (mémoire par image + budget de temps) ; ne lève jamais et
+     * n'affecte jamais la réponse (les documents/répertoires hors liste blanche sont ignorés).
+     */
+    private function generateNewImageVariants(): void
+    {
+        $uploads = $this->newUploads;
+        $this->newUploads = [];
+        $deadline = microtime(true) + self::VARIANT_REQUEST_BUDGET_SECONDS;
+
+        try {
+            $service = app(\App\Services\ImageVariantService::class);
+            foreach ($uploads as [$name, $directory, $private]) {
+                if ($private) {
+                    continue;
+                }
+                if (microtime(true) > $deadline) {
+                    \Illuminate\Support\Facades\Log::info('Budget variantes WebP épuisé : reste à traiter par app:optimize-images');
+                    break;
+                }
+                $service->generateForStored($name, $directory);
+            }
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('Variantes WebP ignorées après upload', ['error' => $e->getMessage()]);
+        }
+    }
+
     private function safeExt(UploadedFile $file, string $allowedMimes): string
     {
         $allowed = explode(',', $allowedMimes);

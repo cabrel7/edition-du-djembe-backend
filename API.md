@@ -359,6 +359,41 @@ d'intégrité).
 
 ---
 
+## Variantes WebP des images publiques
+
+**Principe** : pour chaque image publique (articles, couvertures de livres/mémoires/presse, galerie presse, vignettes vidéo, partenaires, équipe) on génère à côté de l'original une copie WebP allégée (côté max 1600 px, qualité 80, alpha conservé, orientation EXIF appliquée). Les originaux, les URL et les valeurs en base ne changent JAMAIS ; la variante est facultative (le site fonctionne sans).
+
+**Dossiers couverts (liste blanche `config/images.php`)** : `press-reviews/covers`, `press-reviews/gallery`, `press-reviews/editor`, `articles`, `books/covers`, `memoirs/covers`, `video` (vignettes seulement), `service` (rattrapage par la commande uniquement : pas de génération à l'upload), `partners`, `team`. Les dossiers de documents (PDF/DOC) ne sont jamais traités.
+
+**Convention de nommage** : `<fichier original complet>.webp`, dans le même dossier. Exemples : `/books/covers/abc.png` -> `/books/covers/abc.png.webp` ; `/articles/x.jpg` -> `/articles/x.jpg.webp`. Une variante n'existe que si elle est plus légère que l'original (sinon supprimée) ; GIF animés, WebP déjà légers (<= 200 Ko), SVG, symlinks et fichiers hors liste blanche (`config/images.php`) sont ignorés.
+
+**Contrat nginx (à configurer côté serveur)** : pour une requête sur une image `*.png|*.jpg|*.jpeg|*.gif|*.webp` des dossiers listés, SI l'en-tête `Accept` contient `image/webp` ET que le fichier `<uri>.webp` existe, servir `<uri>.webp` avec `Content-Type: image/webp`, `Vary: Accept` (cache/CDN) et le `Cache-Control` habituel ; sinon servir l'original. Exemple :
+
+```nginx
+map $http_accept $webp_suffix { default ""; "~*image/webp" ".webp"; }
+location ~* ^/(articles|books/covers|memoirs/covers|video|partners|team|service|press-reviews/(covers|gallery|editor))/[^/]+\.(png|jpe?g|gif|webp)$ {
+    add_header Vary Accept;
+    try_files $uri$webp_suffix $uri =404;
+}
+```
+
+La règle est insensible à la casse (`location ~*`) : `X.PNG` est servi via `X.PNG.webp` (le suffixe est ajouté tel quel, casse de l'original conservée). (`try_files` sert `<uri>.webp` s'il existe, avec le type MIME déduit de l'extension finale `.webp`.)
+
+**Génération**
+- À l'upload (saveArticle, saveBook, saveMemoir, saveVideo, partners, team_members, revues de presse : couverture + galerie) : après l'enregistrement en base réussi, de façon synchrone, plafonnée (96 Mo de mémoire GD estimée par image, 8 s par requête) ; un échec n'affecte jamais la réponse. Au remplacement ou à la suppression de l'original, `<fichier>.webp` est supprimé aussi (`StoredFileService::delete`).
+- Rattrapage des images existantes : `php artisan app:optimize-images`
+  - défaut = `--dry-run` : n'écrit rien, affiche nombre de fichiers, gain estimé (ratio indicatif 0,30) et fichiers ignorés ;
+  - `--apply` écrit les variantes ; `--force` régénère même si à jour ; `--dir=books/covers` limite à un répertoire de la liste blanche ; `--limit=N` plafonne le nombre de fichiers traités (ceux à jour ne comptent pas) ;
+  - code de sortie : `0` si aucun échec, `1` si au moins une image a échoué (`failed > 0`), si le verrou est pris (« déjà en cours ») ou si le fichier de verrou est inutilisable (message distinct « Impossible d'ouvrir le fichier de verrou ») ;
+  - nettoie d'abord les fichiers temporaires orphelins (`<original>.webp.<12 hex>.tmp`, plus anciens que 1 h, dans les dossiers de la liste blanche) : listés en dry-run, supprimés avec `--apply`, comptés dans la sortie ;
+  - idempotente, verrou `flock` (`storage/framework/optimize-images.lock`, créé en 0664 ; repli sur le dossier temporaire système si `storage/framework` n'est pas inscriptible) : deux exécutions simultanées sont refusées ;
+  - cron conseillé (ex. toutes les nuits) : `nice -n 19 php artisan app:optimize-images --apply --limit=200` ;
+  - recommandé en production, en basse priorité, avec l'utilisateur qui possède le dossier : `nice -n 19 ionice -c3 php artisan app:optimize-images --apply --limit=200` ;
+  - les variantes sont créées en `0664` (dossier `2770 ubuntu:www-data` : le groupe `www-data` hérite et peut lire).
+- Mémoire : ~ largeur x hauteur x 4 octets pour l'image décodée + la copie réduite (max 1600 px) + 16 Mo de marge ; image refusée (ignorée, motif `memory_limit`) au-delà de 96 Mo estimés ou si `memory_limit` PHP est insuffisant.
+
+---
+
 ## Annexe — codes statut métier (contenus)
 
 | Champ | Valeurs |

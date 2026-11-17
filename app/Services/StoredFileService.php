@@ -28,7 +28,8 @@ class StoredFileService
             return false;
         }
 
-        $candidates = [public_path($directory . '/' . $name)];
+        $publicPath = public_path($directory . '/' . $name);
+        $candidates = [$publicPath];
         if ($private) {
             array_unshift($candidates, storage_path('app/private/' . $directory . '/' . $name));
         }
@@ -41,6 +42,10 @@ class StoredFileService
             try {
                 if (@unlink($path)) {
                     $deleted = true;
+                    // Variante WebP : uniquement pour une image du web root (jamais document privé ni autre fichier).
+                    if ($path === $publicPath && ImageVariantService::isOriginalName($name)) {
+                        $this->deleteVariant($path);
+                    }
                 } else {
                     Log::warning('Suppression de fichier remplacé impossible', ['file' => $name, 'directory' => $directory]);
                 }
@@ -50,6 +55,19 @@ class StoredFileService
         }
 
         return $deleted;
+    }
+
+    /** Supprime la variante WebP `<fichier>.webp` de l'original supprimé (jamais d'exception). */
+    private function deleteVariant(string $originalPath): void
+    {
+        $variant = ImageVariantService::variantPath($originalPath);
+        try {
+            if (is_file($variant) || is_link($variant)) {
+                @unlink($variant);
+            }
+        } catch (\Throwable $e) {
+            Log::warning('Suppression de variante WebP en échec', ['file' => basename($variant), 'error' => $e->getMessage()]);
+        }
     }
 
     private function safeName(?string $stored): ?string

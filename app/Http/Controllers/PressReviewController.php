@@ -18,6 +18,7 @@ class PressReviewController extends Controller
     use \App\Http\Controllers\Concerns\EnsuresAdminRole;
 
     private const COVERS_DIR = 'press-reviews/covers';
+    private const EDITOR_DIR = 'press-reviews/editor';
     private const DOCUMENTS_DIR = PressReviewDocumentService::DOCUMENTS_DIR;
     private const MAX_PER_PAGE = 50;
     private const SORTABLE_COLUMNS = ['published_at', 'created_at', 'updated_at', 'title', 'views', 'category', 'status'];
@@ -346,6 +347,7 @@ class PressReviewController extends Controller
             }
 
             $pressReview = PressReview::create($data);
+            $this->generateNewImageVariants();
 
             return response()->json([
                 'success' => true,
@@ -471,6 +473,7 @@ class PressReviewController extends Controller
             }
 
             $pressReview->update($data);
+            $this->generateNewImageVariants();
             // Persisté : les nouveaux fichiers sont désormais référencés, plus rien à nettoyer si la suite échoue.
             $this->beginUploads();
 
@@ -817,7 +820,7 @@ class PressReviewController extends Controller
         try {
             $file = $request->file('image');
             $filename = Str::random(20) . '.' . $this->safeExt($file, UploadConstraints::IMAGE_MIMES);
-            $file->move(public_path('press-reviews/editor'), $filename);
+            $file->move(public_path(self::EDITOR_DIR), $filename);
         } catch (\Exception $e) {
             Log::error('Erreur lors de l\'upload d\'image éditeur', ['error' => $e->getMessage()]);
 
@@ -827,9 +830,12 @@ class PressReviewController extends Controller
             ], 500);
         }
 
+        // Après écriture réussie ; ne lève jamais et n'affecte pas la réponse.
+        app(\App\Services\ImageVariantService::class)->generateForStored($filename, self::EDITOR_DIR);
+
         return response()->json([
             'success' => true,
-            'url' => asset('press-reviews/editor/' . $filename)
+            'url' => asset(self::EDITOR_DIR . '/' . $filename)
         ], 200);
     }
 

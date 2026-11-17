@@ -14,6 +14,9 @@ abstract class TestCase extends BaseTestCase
     protected function setUp(): void
     {
         parent::setUp();
+        // Aucune variante WebP par défaut (liste blanche vide) : les tests ne polluent jamais public/.
+        // Les tests dédiés réactivent explicitement les répertoires qu'ils utilisent.
+        config(['images.directories' => []]);
         $this->ensurePassportPersonalAccessClient();
     }
 

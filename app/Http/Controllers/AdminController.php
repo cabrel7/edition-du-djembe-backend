@@ -127,6 +127,7 @@ class AdminController extends Controller
                 $video = Video::create($data);
             }
             $this->deleteStoredFile($oldThumbnail, self::VIDEO_DIR);
+            $this->generateNewImageVariants();
 
             return response()->json(['message' => 'Vidéo enregistrée', 'video' => $video], 200);
         } catch (ModelNotFoundException $e) {
@@ -279,6 +280,7 @@ class AdminController extends Controller
                 $article = Article::create($data);
             }
             $this->deleteStoredFile($oldImage, self::ARTICLE_DIR);
+            $this->generateNewImageVariants();
 
             return response()->json(['message' => 'Article enregistré avec succès','article' => $article], 200);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
@@ -376,6 +378,7 @@ class AdminController extends Controller
             foreach ($replaced as [$old, $dir, $private]) {
                 $this->deleteStoredFile($old, $dir, $private);
             }
+            $this->generateNewImageVariants();
 
             return response()->json(['message' => 'Livre enregistré avec succès','book' => $book], 200);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
@@ -467,6 +470,7 @@ class AdminController extends Controller
             foreach ($replaced as [$old, $dir, $private]) {
                 $this->deleteStoredFile($old, $dir, $private);
             }
+            $this->generateNewImageVariants();
 
             return response()->json(['message' => 'Mémoire enregistré','memoir' => $memoir], 200);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
@@ -518,6 +522,7 @@ class AdminController extends Controller
                 $service = Service::create($data);
             }
             $this->deleteStoredFile($oldImage, self::SERVICE_DIR);
+            $this->generateNewImageVariants();
 
             return response()->json(['message' => 'Service enregistré','service' => $service], 200);
         } catch (ModelNotFoundException $e) {

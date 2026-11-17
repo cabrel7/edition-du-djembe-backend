@@ -41,7 +41,10 @@ class TeamPartnerController extends Controller
     private function persistOrDiscard(callable $write): mixed
     {
         try {
-            return $write();
+            $result = $write();
+            $this->generateNewImageVariants();
+
+            return $result;
         } catch (\Throwable $e) {
             $this->discardNewUploads();
 

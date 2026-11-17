@@ -14,6 +14,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\File;
 use Laravel\Passport\Passport;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 /**
@@ -167,7 +168,7 @@ class AdminBackofficeFixesTest extends TestCase
         ];
     }
 
-    /** @dataProvider deleteRoutes */
+    #[DataProvider('deleteRoutes')]
     public function test_b2_delete_unknown_id_is_404_json(string $prefix): void
     {
         $this->admin();
